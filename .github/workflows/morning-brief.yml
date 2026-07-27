@@ -1,0 +1,29 @@
+name: morning-brief
+on:
+  schedule:
+    - cron: "0 22 * * 0-4"
+  workflow_dispatch: {}
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run brief
+        env:
+          KAKAO_REST_KEY:       ${{ secrets.KAKAO_REST_KEY }}
+          KAKAO_REFRESH_TOKEN:  ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          NAVER_CLIENT_ID:      ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET:  ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: python morning_brief.py
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brief-html
+          path: output/*.html
+          retention-days: 30
