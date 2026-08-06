@@ -10,6 +10,9 @@ concurrency:
   group: briefing
   cancel-in-progress: false
 
+permissions:
+  contents: write          # data/ 폴더 커밋을 위해 필요
+
 jobs:
   brief:
     runs-on: ubuntu-latest
@@ -36,14 +39,31 @@ jobs:
           HOLDINGS_PATH:       holdings.json
           DAILY_YEARS:         "1"
           MONTHLY_YEARS:       "3"
+          PAGES_BASE_URL:      ${{ vars.PAGES_BASE_URL }}
         run: python portfolio_briefing.py
+
+      - name: Commit data/ folder
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ || true
+          if git diff --cached --quiet; then
+            echo "변경사항 없음 — 커밋 skip"
+          else
+            git commit -m "chore: 포트폴리오 분석 데이터 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
 
 # 참고:
 #  - GitHub Actions cron 은 UTC 고정. 베트남/한국은 DST 없어 오프셋 불변이라 안전.
 #  - 스케줄 지연: Actions 무료 러너는 트래픽에 따라 수 분 지연될 수 있음.
-#    봉 마감 직후 정확도가 중요하면 각 cron 을 정각 대신 +2~3분(예: "3 0,2,...")으로.
 #  - 비거래일은 스크립트 내부(is_kr_trading_day)에서 자동 skip.
 #  - DAILY_YEARS/MONTHLY_YEARS 로 일봉/월봉 소스 기간 조절 (타임아웃 조정용).
 #  - 2025-12-27부로 KRX 정보데이터시스템이 회원제로 전환되어, pykrx가
 #    KRX_ID/KRX_PW 환경변수(로그인 계정)를 요구합니다. Secrets에 등록 필수.
-#    (Settings -> Secrets and variables -> Actions -> New repository secret)
+#  - data/ 폴더는 매 실행마다 자동 커밋됩니다(상세 JSON+HTML 이력 축적).
+#    커밋 충돌 방지를 위해 concurrency 로 동시 실행을 막아둠.
+#  - (선택) GitHub Pages 를 켜면 카톡에 상세 리포트 링크가 붙습니다.
+#    Settings→Pages 활성화 후, Actions Variables 에 PAGES_BASE_URL 등록
+#    (예: https://<user>.github.io/<repo>).
