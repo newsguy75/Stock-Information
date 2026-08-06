@@ -31,6 +31,8 @@ jobs:
           KAKAO_REST_KEY:      ${{ secrets.KAKAO_REST_KEY }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
           KAKAO_ACCESS_TOKEN:  ${{ secrets.KAKAO_ACCESS_TOKEN }}
+          KRX_ID:              ${{ secrets.KRX_ID }}
+          KRX_PW:              ${{ secrets.KRX_PW }}
           HOLDINGS_PATH:       holdings.json
           DAILY_YEARS:         "1"
           MONTHLY_YEARS:       "3"
@@ -42,3 +44,6 @@ jobs:
 #    봉 마감 직후 정확도가 중요하면 각 cron 을 정각 대신 +2~3분(예: "3 0,2,...")으로.
 #  - 비거래일은 스크립트 내부(is_kr_trading_day)에서 자동 skip.
 #  - DAILY_YEARS/MONTHLY_YEARS 로 일봉/월봉 소스 기간 조절 (타임아웃 조정용).
+#  - 2025-12-27부로 KRX 정보데이터시스템이 회원제로 전환되어, pykrx가
+#    KRX_ID/KRX_PW 환경변수(로그인 계정)를 요구합니다. Secrets에 등록 필수.
+#    (Settings -> Secrets and variables -> Actions -> New repository secret)
