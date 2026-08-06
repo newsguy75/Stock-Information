@@ -1,0 +1,127 @@
+{
+  "name": "에이비엘바이오",
+  "code": "298380",
+  "price": 83300,
+  "change_pct": 3.87,
+  "timestamp": "2026-08-06T23:07:13.389523+00:00",
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": true,
+      "type": "상승",
+      "from_date": "2026-07-21",
+      "to_date": "2026-07-30",
+      "basis": "가격 69,300→60,800(하락) vs %K 7→8(상승)",
+      "summary": "상승다이버전스 [2026-07-30] — 가격 69,300→60,800(하락) vs %K 7→8(상승)"
+    },
+    "월봉": {
+      "ok": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "장기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "장기": {
+        "ok": true,
+        "k": 29.1,
+        "d": 13.8,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "중기": {
+        "ok": true,
+        "k": 75.8,
+        "d": 45.3,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "단기": {
+        "ok": true,
+        "k": 91.7,
+        "d": 84.0,
+        "direction": "상승",
+        "zone": "과매수",
+        "cross": null
+      }
+    },
+    "monthly": {
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": true,
+        "k": 11.7,
+        "d": 8.3,
+        "direction": "상승",
+        "zone": "과매도",
+        "cross": "골든크로스"
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기상승·중기상승·단기상승",
+        "월봉 단기 상승"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 83300,
+    "ma5": 76340,
+    "ma20": 73675,
+    "position": "5일선 위 / 20일선 위",
+    "gap_pct": 3.62,
+    "state": "정배열(5>20)",
+    "forecast": null,
+    "note": null
+  },
+  "supply_demand": {
+    "ok": true,
+    "foreign_5d": -8367830250,
+    "foreign_20d": 42026658700,
+    "inst_5d": 39668945500,
+    "inst_20d": 20622589650,
+    "indiv_ratio": 48.9,
+    "summary": "외인 5일 매도·20일 매수 / 기관 5일 매수·20일 매수 / 개인비중 49%"
+  },
+  "shorting": {
+    "ok": true,
+    "short_5d_trend": "하락",
+    "short_ratio_now": 2.9,
+    "short_ratio_5d_ago": 7.0,
+    "summary": "공매도 5일 하락 추세, 비중 7.0%→2.9%"
+  },
+  "daily_verdict": {
+    "score": 5,
+    "verdict": "원만한 상승 예상",
+    "reasons": [
+      "일봉 단기 스토캐 상승",
+      "일봉 상승다이버전스",
+      "5>20 정배열",
+      "기관 5일 순매수"
+    ]
+  },
+  "monthly_verdict": {
+    "score": 1,
+    "verdict": "월봉 반등 초입 가능",
+    "reasons": [
+      "월봉 단기 스토캐 상승"
+    ],
+    "note": "월봉은 12개월 데이터 기준 분석(장기 지표 제약)"
+  }
+}

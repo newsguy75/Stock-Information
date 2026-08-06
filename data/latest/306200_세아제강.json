@@ -1,0 +1,122 @@
+{
+  "name": "세아제강",
+  "code": "306200",
+  "price": 130600,
+  "change_pct": 1.08,
+  "timestamp": "2026-08-06T23:07:28.492950+00:00",
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": false
+    },
+    "월봉": {
+      "ok": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "장기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "장기": {
+        "ok": true,
+        "k": 41.6,
+        "d": 46.2,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null
+      },
+      "중기": {
+        "ok": true,
+        "k": 43.0,
+        "d": 33.5,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "단기": {
+        "ok": true,
+        "k": 81.4,
+        "d": 73.5,
+        "direction": "상승",
+        "zone": "과매수",
+        "cross": null
+      }
+    },
+    "monthly": {
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": true,
+        "k": 19.9,
+        "d": 30.6,
+        "direction": "하락",
+        "zone": "과매도",
+        "cross": null
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기하락·중기상승·단기상승",
+        "월봉 단기 하락"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 130600,
+    "ma5": 128560,
+    "ma20": 126305,
+    "position": "5일선 위 / 20일선 위",
+    "gap_pct": 1.79,
+    "state": "정배열(5>20)",
+    "forecast": "약 9일 뒤 데드크로스 우려 (갭 1.8%, 발산 -0.19%/일)",
+    "note": null
+  },
+  "supply_demand": {
+    "ok": true,
+    "foreign_5d": 904855400,
+    "foreign_20d": -355282750,
+    "inst_5d": 86343450,
+    "inst_20d": 3859396000,
+    "indiv_ratio": 43.8,
+    "summary": "외인 5일 매수·20일 매도 / 기관 5일 매수·20일 매수 / 개인비중 44%"
+  },
+  "shorting": {
+    "ok": true,
+    "short_5d_trend": "하락",
+    "short_ratio_now": 1.3,
+    "short_ratio_5d_ago": 5.0,
+    "summary": "공매도 5일 하락 추세, 비중 5.0%→1.3%"
+  },
+  "daily_verdict": {
+    "score": 4,
+    "verdict": "원만한 상승 예상",
+    "reasons": [
+      "일봉 단기 스토캐 상승",
+      "5>20 정배열",
+      "외인 5일 순매수",
+      "기관 5일 순매수"
+    ]
+  },
+  "monthly_verdict": {
+    "score": -1,
+    "verdict": "월봉 약세 지속",
+    "reasons": [
+      "월봉 단기 스토캐 하락"
+    ],
+    "note": "월봉은 12개월 데이터 기준 분석(장기 지표 제약)"
+  }
+}

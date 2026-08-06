@@ -1,0 +1,122 @@
+{
+  "name": "LS ELECTRIC",
+  "code": "010120",
+  "price": 202500,
+  "change_pct": -4.48,
+  "timestamp": "2026-08-06T23:07:39.259529+00:00",
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": false
+    },
+    "월봉": {
+      "ok": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "장기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "장기": {
+        "ok": true,
+        "k": 36.7,
+        "d": 23.2,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "중기": {
+        "ok": true,
+        "k": 62.7,
+        "d": 39.2,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "단기": {
+        "ok": true,
+        "k": 90.0,
+        "d": 89.6,
+        "direction": "하락",
+        "zone": "과매수",
+        "cross": null
+      }
+    },
+    "monthly": {
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": true,
+        "k": 39.1,
+        "d": 53.8,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기상승·중기상승·단기하락",
+        "월봉 단기 하락"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 202500,
+    "ma5": 196940,
+    "ma20": 190720,
+    "position": "5일선 위 / 20일선 위",
+    "gap_pct": 3.26,
+    "state": "정배열(5>20)",
+    "forecast": null,
+    "note": null
+  },
+  "supply_demand": {
+    "ok": true,
+    "foreign_5d": 82711717450,
+    "foreign_20d": 86454755550,
+    "inst_5d": 2257257250,
+    "inst_20d": -66270292500,
+    "indiv_ratio": 9.9,
+    "summary": "외인 5일 매수·20일 매수 / 기관 5일 매수·20일 매도 / 개인비중 10%"
+  },
+  "shorting": {
+    "ok": true,
+    "short_5d_trend": "하락",
+    "short_ratio_now": 13.1,
+    "short_ratio_5d_ago": 17.0,
+    "summary": "공매도 5일 하락 추세, 비중 17.0%→13.1%"
+  },
+  "daily_verdict": {
+    "score": 2,
+    "verdict": "완만한 상승/반등 시도",
+    "reasons": [
+      "일봉 단기 스토캐 하락",
+      "5>20 정배열",
+      "외인 5일 순매수",
+      "기관 5일 순매수"
+    ]
+  },
+  "monthly_verdict": {
+    "score": -1,
+    "verdict": "월봉 약세 지속",
+    "reasons": [
+      "월봉 단기 스토캐 하락"
+    ],
+    "note": "월봉은 12개월 데이터 기준 분석(장기 지표 제약)"
+  }
+}

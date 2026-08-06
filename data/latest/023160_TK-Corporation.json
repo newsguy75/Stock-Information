@@ -1,0 +1,127 @@
+{
+  "name": "TK Corporation",
+  "code": "023160",
+  "price": 23100,
+  "change_pct": -2.12,
+  "timestamp": "2026-08-06T23:06:50.195640+00:00",
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": true,
+      "type": "상승",
+      "from_date": "2026-07-21",
+      "to_date": "2026-07-29",
+      "basis": "가격 20,500→20,050(하락) vs %K 8→28(상승)",
+      "summary": "상승다이버전스 [2026-07-29] — 가격 20,500→20,050(하락) vs %K 8→28(상승)"
+    },
+    "월봉": {
+      "ok": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "장기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "장기": {
+        "ok": true,
+        "k": 38.7,
+        "d": 23.3,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "중기": {
+        "ok": true,
+        "k": 53.8,
+        "d": 38.3,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "단기": {
+        "ok": true,
+        "k": 91.6,
+        "d": 82.1,
+        "direction": "상승",
+        "zone": "과매수",
+        "cross": null
+      }
+    },
+    "monthly": {
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": true,
+        "k": 8.4,
+        "d": 22.0,
+        "direction": "하락",
+        "zone": "과매도",
+        "cross": null
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기상승·중기상승·단기상승",
+        "월봉 단기 하락"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 23100,
+    "ma5": 22500,
+    "ma20": 22158,
+    "position": "5일선 위 / 20일선 위",
+    "gap_pct": 1.55,
+    "state": "정배열(5>20)",
+    "forecast": null,
+    "note": null
+  },
+  "supply_demand": {
+    "ok": true,
+    "foreign_5d": 972016750,
+    "foreign_20d": 2657971450,
+    "inst_5d": -981506550,
+    "inst_20d": -2189437250,
+    "indiv_ratio": 11.9,
+    "summary": "외인 5일 매수·20일 매수 / 기관 5일 매도·20일 매도 / 개인비중 12%"
+  },
+  "shorting": {
+    "ok": true,
+    "short_5d_trend": "하락",
+    "short_ratio_now": 0.3,
+    "short_ratio_5d_ago": 8.4,
+    "summary": "공매도 5일 하락 추세, 비중 8.4%→0.3%"
+  },
+  "daily_verdict": {
+    "score": 5,
+    "verdict": "원만한 상승 예상",
+    "reasons": [
+      "일봉 단기 스토캐 상승",
+      "일봉 상승다이버전스",
+      "5>20 정배열",
+      "외인 5일 순매수"
+    ]
+  },
+  "monthly_verdict": {
+    "score": -1,
+    "verdict": "월봉 약세 지속",
+    "reasons": [
+      "월봉 단기 스토캐 하락"
+    ],
+    "note": "월봉은 12개월 데이터 기준 분석(장기 지표 제약)"
+  }
+}

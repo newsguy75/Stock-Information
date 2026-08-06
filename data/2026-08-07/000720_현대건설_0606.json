@@ -1,0 +1,128 @@
+{
+  "name": "현대건설",
+  "code": "000720",
+  "price": 112600,
+  "change_pct": 2.27,
+  "timestamp": "2026-08-06T23:07:23.515476+00:00",
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": true,
+      "type": "상승",
+      "from_date": "2026-07-20",
+      "to_date": "2026-07-30",
+      "basis": "가격 91,000→81,700(하락) vs %K 15→19(상승)",
+      "summary": "상승다이버전스 [2026-07-30] — 가격 91,000→81,700(하락) vs %K 15→19(상승)"
+    },
+    "월봉": {
+      "ok": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "장기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "장기": {
+        "ok": true,
+        "k": 47.3,
+        "d": 30.9,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "중기": {
+        "ok": true,
+        "k": 72.7,
+        "d": 47.6,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null
+      },
+      "단기": {
+        "ok": true,
+        "k": 95.4,
+        "d": 88.7,
+        "direction": "상승",
+        "zone": "과매수",
+        "cross": null
+      }
+    },
+    "monthly": {
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": true,
+        "k": 19.7,
+        "d": 33.2,
+        "direction": "하락",
+        "zone": "과매도",
+        "cross": null
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기상승·중기상승·단기상승",
+        "월봉 단기 하락"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 112600,
+    "ma5": 102880,
+    "ma20": 99155,
+    "position": "5일선 위 / 20일선 위",
+    "gap_pct": 3.76,
+    "state": "정배열(5>20)",
+    "forecast": null,
+    "note": null
+  },
+  "supply_demand": {
+    "ok": true,
+    "foreign_5d": 1878054000,
+    "foreign_20d": 59523724650,
+    "inst_5d": 27392458750,
+    "inst_20d": 52849580900,
+    "indiv_ratio": 49.8,
+    "summary": "외인 5일 매수·20일 매수 / 기관 5일 매수·20일 매수 / 개인비중 50%"
+  },
+  "shorting": {
+    "ok": true,
+    "short_5d_trend": "하락",
+    "short_ratio_now": 7.5,
+    "short_ratio_5d_ago": 9.6,
+    "summary": "공매도 5일 하락 추세, 비중 9.6%→7.5%"
+  },
+  "daily_verdict": {
+    "score": 6,
+    "verdict": "원만한 상승 예상",
+    "reasons": [
+      "일봉 단기 스토캐 상승",
+      "일봉 상승다이버전스",
+      "5>20 정배열",
+      "외인 5일 순매수",
+      "기관 5일 순매수"
+    ]
+  },
+  "monthly_verdict": {
+    "score": -1,
+    "verdict": "월봉 약세 지속",
+    "reasons": [
+      "월봉 단기 스토캐 하락"
+    ],
+    "note": "월봉은 12개월 데이터 기준 분석(장기 지표 제약)"
+  }
+}
