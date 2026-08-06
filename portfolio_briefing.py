@@ -23,6 +23,7 @@ import requests
 import data_feed as feed
 from report_html import build_html, analyze_stock, one_line_summary_from
 from indices import fetch_indices
+from emailer import send_email_report
 
 HOLDINGS_PATH = os.environ.get("HOLDINGS_PATH", "holdings.json")
 REPORT_DIR = os.environ.get("REPORT_DIR", "report")
@@ -57,13 +58,13 @@ def collect(holdings, demo=False):
     return results, summaries
 
 
-def save_html(results, index_views=None) -> str:
+def save_html(results, index_views=None):
     os.makedirs(REPORT_DIR, exist_ok=True)
     html = build_html(results, index_views=index_views or [])
     path = os.path.join(REPORT_DIR, "index.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
-    return path
+    return path, html
 
 
 def refresh_access_token():
@@ -138,12 +139,13 @@ def main():
 
     results, summaries = collect(holdings, demo=args.demo)
     index_views = [] if args.demo else fetch_indices()
-    path = save_html(results, index_views=index_views)
+    path, html = save_html(results, index_views=index_views)
     print(f"HTML 저장: {path}")
     if args.dry_run or args.demo:
         print("\n".join(summaries))
     else:
         send_kakao(results, summaries, link_url=PAGES_URL)
+        send_email_report(html)   # 이메일로 HTML 본문+첨부 전송
 
 
 if __name__ == "__main__":
