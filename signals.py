@@ -15,24 +15,18 @@ from dataclasses import dataclass, asdict
 from typing import Literal, Optional
 
 
-# ----------------------------------------------------------------------
-# 설정
-# ----------------------------------------------------------------------
 @dataclass
 class SignalConfig:
     ma_short: int = 5
     ma_mid: int = 20
     ma_long: int = 60
-    slope_lookback: int = 3          # MA5 방향 판정용 lookback (봉 수)
-    flat_threshold_pct: float = 0.3  # 이 % 이내 변화면 '보합'
-    touch_tol_pct: float = 0.8       # 저가가 MA5의 이 % 이내로 눌리면 '터치'
-    cross_lookback: int = 3          # 최근 몇 봉 내 크로스를 '발생'으로 볼지
-    vol_ma_period: int = 5           # 거래량 이동평균 기간 (거래량 5일/5봉선)
+    slope_lookback: int = 3
+    flat_threshold_pct: float = 0.3
+    touch_tol_pct: float = 0.8
+    cross_lookback: int = 3
+    vol_ma_period: int = 5
 
 
-# ----------------------------------------------------------------------
-# 개별 시그널 데이터 구조
-# ----------------------------------------------------------------------
 @dataclass
 class MASignal:
     ma5: float
@@ -42,8 +36,8 @@ class MASignal:
     ma5_slope_pct: float
     alignment: Literal["정배열", "역배열", "혼조"]
     above_ma5: bool
-    ma5_touch: bool                 # 5일선 위에 있으면서 저가가 5일선을 터치
-    cross_5_20: Optional[str]       # '골든크로스' / '데드크로스' / None
+    ma5_touch: bool
+    cross_5_20: Optional[str]
     cross_20_60: Optional[str]
     cross_5_60: Optional[str]
 
@@ -52,15 +46,11 @@ class MASignal:
 class VolumeSignal:
     volume: float
     vol_ma: float
-    over_vol_ma: bool               # 현재 거래량 > 거래량 이동평균
-    ratio: float                    # volume / vol_ma
+    over_vol_ma: bool
+    ratio: float
 
 
-# ----------------------------------------------------------------------
-# 계산 함수
-# ----------------------------------------------------------------------
 def _cross(fast: pd.Series, slow: pd.Series, lookback: int) -> Optional[str]:
-    """최근 lookback 봉 내에 fast가 slow를 상향/하향 돌파했는지"""
     diff = (fast - slow).dropna()
     if len(diff) < lookback + 1:
         return None
@@ -84,7 +74,6 @@ def compute_ma_signal(df: pd.DataFrame, cfg: SignalConfig = SignalConfig()) -> M
     ma20_now = ma20.iloc[-1]
     ma60_now = ma60.iloc[-1]
 
-    # MA5 방향 (slope_lookback 봉 전 대비 %)
     if len(ma5.dropna()) > cfg.slope_lookback:
         prev = ma5.iloc[-(cfg.slope_lookback + 1)]
         slope_pct = (ma5_now - prev) / prev * 100 if prev else 0.0
@@ -97,7 +86,6 @@ def compute_ma_signal(df: pd.DataFrame, cfg: SignalConfig = SignalConfig()) -> M
     else:
         direction = "보합"
 
-    # 정배열 / 역배열
     if not any(pd.isna([ma5_now, ma20_now, ma60_now])):
         if ma5_now > ma20_now > ma60_now:
             alignment = "정배열"
@@ -108,18 +96,18 @@ def compute_ma_signal(df: pd.DataFrame, cfg: SignalConfig = SignalConfig()) -> M
     else:
         alignment = "혼조"
 
-    # 5일선 위 + 터치
     last_close = close.iloc[-1]
     last_low = df["low"].iloc[-1]
     above = bool(last_close >= ma5_now) if not pd.isna(ma5_now) else False
     touch = False
     if above and not pd.isna(ma5_now):
-        # 저가가 5일선을 아래로 관통하거나 tol 이내로 근접
         if last_low <= ma5_now * (1 + cfg.touch_tol_pct / 100):
             touch = True
 
     return MASignal(
-        ma5=float(ma5_now), ma20=float(ma20_now), ma60=float(ma60_now),
+        ma5=float(ma5_now) if pd.notna(ma5_now) else float("nan"),
+        ma20=float(ma20_now) if pd.notna(ma20_now) else float("nan"),
+        ma60=float(ma60_now) if pd.notna(ma60_now) else float("nan"),
         ma5_direction=direction, ma5_slope_pct=float(slope_pct),
         alignment=alignment, above_ma5=above, ma5_touch=touch,
         cross_5_20=_cross(ma5, ma20, cfg.cross_lookback),
@@ -138,9 +126,6 @@ def compute_volume_signal(df: pd.DataFrame, cfg: SignalConfig = SignalConfig()) 
     return VolumeSignal(volume=v_now, vol_ma=vma_now, over_vol_ma=over, ratio=ratio)
 
 
-# ----------------------------------------------------------------------
-# 리샘플 (일봉 -> 주봉/월봉)
-# ----------------------------------------------------------------------
 def to_weekly(df_daily: pd.DataFrame) -> pd.DataFrame:
     agg = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     return df_daily.resample("W-FRI").agg(agg).dropna(how="any")
@@ -152,7 +137,6 @@ def to_monthly(df_daily: pd.DataFrame) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    # 더미 테스트
     rng = pd.date_range("2020-01-01", periods=1500, freq="B")
     rnd = np.random.default_rng(3)
     close = 20000 + np.cumsum(rnd.normal(0, 200, len(rng)))

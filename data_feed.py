@@ -4,9 +4,19 @@ data_feed.py
 ============
 데이터 수집 계층.
 
-- 일봉(주봉/월봉 재료): FinanceDataReader (primary) / pykrx (fallback)
+- 일봉(단타/스윙용, 일봉·주봉 MA5/20/60 + 스토캐 다이버전스 재료): 1년치
+- 월봉 계산 전용 소스: 3년치 (월봉 MA5/20 + 다이버전스 재료. MA60은 60개월=5년
+  필요해 3년으로는 안 나오지만, 3대 메인 지표 중 스토캐 다이버전스 프레임 유지가
+  우선이라 여기서는 MA60은 포기하고 다이버전스/단기 MA만 본다.)
 - 1시간봉: Naver 분봉 차트 API를 받아 60분으로 resample
            (pykrx/FDR/yfinance는 국내 분봉 미지원)
+
+기존 대비 변경점 (타임아웃 완화):
+  - 예전: 종목당 1콜 x 6년치 (일봉 MA60/주봉 MA60/월봉 MA60 전부 커버 목적)
+  - 신규: 종목당 2콜 x (1년치 + 3년치) = 데이터량 약 33% 감소
+    -> payload 크기가 타임아웃 원인이었다면 개선.
+    -> API 호출 횟수(rate limit)가 원인이었다면 오히려 콜 수가 늘어나므로,
+       실제 타임아웃 로그로 원인 재확인 권장 (건당 vs 총량 문제 구분).
 
 주의: 이 모듈의 실제 네트워크 호출은 GitHub Actions / 로컬 등
       외부망이 열린 환경에서 동작합니다. 함수는 모두 방어적으로
@@ -21,11 +31,13 @@ import requests
 
 
 # ----------------------------------------------------------------------
-# 일봉
+# 일봉 - 단기 소스 (일/주봉용, 기본 1년)
 # ----------------------------------------------------------------------
-def fetch_daily_fdr(code: str, years: int = 6) -> pd.DataFrame:
-    """FinanceDataReader로 일봉 수집. 주봉 MA60(=60주), 월봉 MA60(=60개월)
-    까지 계산하려면 최소 5~6년 이상 필요."""
+def fetch_daily_fdr(code: str, years: float = 1.0) -> pd.DataFrame:
+    """FinanceDataReader로 일봉 수집.
+    일봉 MA60(60일) / 주봉 MA5·20(약 5주·20주) 계산에는 1년(약 245거래일)이면
+    충분. 주봉 MA60(=60주=약1.15년)은 1년으로는 근소하게 부족해 생략될 수 있음.
+    """
     import FinanceDataReader as fdr
     end = dt.date.today()
     start = end - dt.timedelta(days=int(years * 365.25))
@@ -35,8 +47,8 @@ def fetch_daily_fdr(code: str, years: int = 6) -> pd.DataFrame:
     return df.sort_index()
 
 
-def fetch_daily_pykrx(code: str, years: int = 6) -> pd.DataFrame:
-    """pykrx fallback."""
+def fetch_daily_pykrx(code: str, years: float = 1.0) -> pd.DataFrame:
+    """pykrx fallback (단기 소스)."""
     from pykrx import stock
     end = dt.date.today().strftime("%Y%m%d")
     start = (dt.date.today() - dt.timedelta(days=int(years * 365.25))).strftime("%Y%m%d")
@@ -48,8 +60,8 @@ def fetch_daily_pykrx(code: str, years: int = 6) -> pd.DataFrame:
     return df.sort_index()
 
 
-def fetch_daily(code: str, years: int = 6) -> pd.DataFrame:
-    """일봉: FDR 우선, 실패 시 pykrx."""
+def fetch_daily(code: str, years: float = 1.0) -> pd.DataFrame:
+    """일봉(단기, 기본 1년): FDR 우선, 실패 시 pykrx."""
     try:
         df = fetch_daily_fdr(code, years)
         if len(df) > 0:
@@ -60,6 +72,27 @@ def fetch_daily(code: str, years: int = 6) -> pd.DataFrame:
         return fetch_daily_pykrx(code, years)
     except Exception as e:
         print(f"[error] pykrx도 실패 {code}: {e}")
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+
+# ----------------------------------------------------------------------
+# 월봉 계산 전용 소스 (기본 3년 = 36개월)
+# ----------------------------------------------------------------------
+def fetch_monthly_source(code: str, years: float = 3.0) -> pd.DataFrame:
+    """월봉 리샘플용 일봉 소스. 3년(=36개월)이면 월봉 MA5/20과
+    다이버전스 피벗 탐지에 필요한 최소한의 여유는 확보됨.
+    월봉 MA60(=60개월=5년)은 이 기간으로는 계산되지 않고 자동 생략됨.
+    """
+    try:
+        df = fetch_daily_fdr(code, years)
+        if len(df) > 0:
+            return df
+    except Exception as e:
+        print(f"[warn] FDR(월봉소스) 실패 {code}: {e}")
+    try:
+        return fetch_daily_pykrx(code, years)
+    except Exception as e:
+        print(f"[error] pykrx(월봉소스)도 실패 {code}: {e}")
         return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
 
@@ -134,7 +167,7 @@ def is_kr_trading_day(date: dt.date | None = None) -> bool:
 # ----------------------------------------------------------------------
 # 더미 데이터 (오프라인 테스트용)
 # ----------------------------------------------------------------------
-def dummy_daily(seed: int = 1, n: int = 1600) -> pd.DataFrame:
+def dummy_daily(seed: int = 1, n: int = 245) -> pd.DataFrame:
     rng = pd.date_range(dt.date.today() - dt.timedelta(days=int(n * 1.4)), periods=n, freq="B")
     r = np.random.default_rng(seed)
     close = 20000 + np.cumsum(r.normal(20, 250, n))
@@ -146,6 +179,11 @@ def dummy_daily(seed: int = 1, n: int = 1600) -> pd.DataFrame:
         "close": close,
         "volume": r.integers(1e5, 2e6, n),
     }, index=rng)
+
+
+def dummy_monthly_source(seed: int = 1, n: int = 735) -> pd.DataFrame:
+    """3년치(약 735 거래일) 더미 - 월봉 리샘플 테스트용."""
+    return dummy_daily(seed=seed + 500, n=n)
 
 
 def dummy_hourly(seed: int = 1, n: int = 400) -> pd.DataFrame:
