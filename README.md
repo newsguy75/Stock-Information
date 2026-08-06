@@ -1,69 +1,61 @@
-# 데일리 아침 브리핑 (KST 07:00 → 카카오)
+# 멀티프레임 포트폴리오 브리핑 (일/주/월/1시간봉)
 
-매 거래일 아침 7시(한국시간), 보유 포트폴리오의 **지수·평가손익·트리거 종목·수급·뉴스**를
-카카오 '나와의 채팅방'으로 자동 발송합니다. 전체 표는 HTML 리포트로 저장.
+베트남 시간 기준 하루 8회(05·07·09·11·13·15·17·19시) 카카오톡 '나와의 채팅방'으로
+포트폴리오 시그널을 전송하는 GitHub Actions 자동화.
 
-- 시세/지수/ETF: **FinanceDataReader** (네이버 기반)
-- 외국인/기관 수급: **네이버 금융** — 단기(2일vs3일 반전) / 중기(20일) / 장기(120일)
-- 뉴스: 네이버 검색 API (선택)
-- 스케줄: **GitHub Actions cron** (무료, PC 안 켜도 됨)
-- 잔고: `holdings.json` 수동 갱신
-
-## 트리거 4종
-| 트리거 | 조건 |
+## 파일 구성
+| 파일 | 역할 |
 |---|---|
-| 등락 | 전일 대비 ±5% 이상 |
-| 거래량 | 20일 평균 대비 3배 이상 |
-| 수급 반전 | 최근 2일 vs 직전 3일 순매매 부호 전환 |
-| 52주 | 고가/저가 3% 이내 근접 |
+| `portfolio_briefing.py` | 메인. 데이터 수집→시그널→리포트→카카오 전송 |
+| `signals.py` | MA(5/20/60) 방향·정배열·골든/데드 크로스·5일선 터치·거래량 5봉선 |
+| `mtf_stoch_scanner.py` | 스토캐스틱 멀티프레임 동조화 + 다이버전스 |
+| `data_feed.py` | 일봉(FDR/pykrx) + 1시간봉(Naver 분봉 resample) 수집 |
+| `holdings.json` | 보유 종목 목록 (실제 종목으로 교체) |
+| `requirements.txt` | 의존성 |
+| `.github/workflows/briefing.yml` | 스케줄러 (UTC cron) |
 
-수급은 반전이 없어도 **항상** 단/중/장 3단계로 표시됩니다.
-표기: `수급 외인 전환매수/매도/매수 · 기관 무/매수/매수` (순서: 단기·중기·장기)
+## 브리핑에 포함되는 시그널
+- **일/주/월봉**: MA5 방향(상향/보합/하향), 5/20/60 정배열·역배열, 5·20 / 20·60 골든·데드크로스, 5일선 위에서의 5일선 지지터치(눌림)
+- **일봉·1시간봉 거래량**: 거래량 5봉선(5일선) 돌파 시 🚨 알람
+- **1시간봉**: 스토캐스틱 상승 전환(구간 표시) + 상승/하락 다이버전스
+- 상단에 '즉시 알람' 섹션으로 거래량 돌파·크로스·다이버전스·5일선 터치를 모아서 표기
 
----
-
-## 로컬 실행 (내 PC)
-```
-python -m pip install -r requirements.txt
-python morning_brief.py
-```
-카카오 키가 없으면 콘솔 출력 + `output/*.html`만 생성됩니다(테스트 모드).
-
-## GitHub 자동화 3단계
-1. 이 폴더를 **비공개(private) 저장소**로 업로드 (잔고 포함이므로 반드시 private)
-2. `.github/workflows/morning-brief.yml` 이 포함됐는지 확인
-3. Settings → Secrets and variables → Actions 에 등록:
-```
-KAKAO_REST_KEY        (필수)
-KAKAO_REFRESH_TOKEN   (필수)
-NAVER_CLIENT_ID       (선택 - 없으면 뉴스 생략)
-NAVER_CLIENT_SECRET   (선택)
-```
-→ Actions 탭 → morning-brief → **Run workflow** 로 즉시 테스트
-
-## 매일 저녁 할 일 (30초)
-`holdings.json`의 `qty`(수량)·`avg`(평단) 수정 후 저장/커밋.
-- 현재 값은 스크린샷에서 **역산한 추정치** → 한 번은 실측으로 교정 필요
-- **전진건설로봇 `code`가 비어 있음** → 6자리 코드 입력 필요(비면 자동 스킵)
-
-## 설정 조정
-`morning_brief.py` 상단 상수:
-```
-TH_CHANGE_PCT  = 5.0    # 등락 기준
-TH_VOL_MULT    = 3.0    # 거래량 배수
-TH_NEAR_HL_PCT = 3.0    # 52주 근접 %
-TH_FLOW_DAYS   = (2,3)  # 단기 수급 반전
-FLOW_MID_DAYS  = 20     # 중기
-FLOW_LONG_DAYS = 120    # 장기
+## 로컬 테스트
+```bash
+pip install -r requirements.txt
+python portfolio_briefing.py --demo      # 더미 데이터, 전송 없음
+python portfolio_briefing.py --dry-run   # 실데이터 조회, 콘솔 출력(전송 X)
 ```
 
-## 참고 / 주의
-- cron `0 22 * * 0-4`(UTC) = KST 월~금 07:00. GitHub 혼잡 시 5~15분 지연 가능.
-- 카카오 access_token 6시간 / **refresh_token 약 2개월** → 만료 시 `get_token.py` 재실행 후 Secret 갱신.
-- 카카오 텍스트 템플릿 200자 제한 → 트리거 종목만 상세 발송, 전체 표는 HTML.
-- ETF는 외국인/기관 수급 데이터가 없어 수급 칸이 비어 있음(나머지 트리거는 정상).
-- 저장소가 60일간 활동이 없으면 GitHub이 스케줄을 자동 비활성화할 수 있음.
+## GitHub 설정
+1. 위 파일들을 레포에 커밋 (`briefing.yml` 은 `.github/workflows/` 아래).
+2. **Settings → Secrets and variables → Actions** 에 등록:
+   - `KAKAO_REST_KEY` (앱 REST API 키)
+   - `KAKAO_REFRESH_TOKEN`
+   - `KAKAO_ACCESS_TOKEN` (선택. 없으면 리프레시로 갱신)
+3. Actions 탭에서 `workflow_dispatch` 로 수동 1회 실행해 전송 확인.
 
-## 다음 확장 예정
-2차: 수급 TOP20 · 업종 등락 · 글로벌 지표(미국/중국/일본, 유가·금리·환율)
-3차: Claude API 분석층 (유망섹터·종목 선정, 뉴스 모멘텀/리스크, 전략의견) + 낮 12시 장중 브리핑
+## 반드시 확인할 것
+- **종목코드**: `holdings.json` 의 코드는 예시입니다. 특히 `전진건설로봇` 은 코드
+  미확정 상태라 빈 값(`""`)으로 두었고, 빈 코드는 자동 skip 됩니다. 정확한 6자리
+  코드로 채워 넣으세요. (잘못된 코드는 엉뚱한 종목을 조회하므로 주의)
+- **1시간봉 데이터**: 국내 분봉은 FDR/pykrx가 지원하지 않아 Naver 분봉 API를
+  resample 합니다. 기존에 쓰시던 검증된 분봉 수집 함수가 있으면
+  `data_feed.fetch_hourly` 를 그걸로 교체하는 걸 권장합니다.
+- **주봉 MA60 / 월봉 MA60**: 각각 60주(~1.2년) / 60개월(5년) 데이터가 필요해
+  일봉을 6년치 받습니다(`fetch_daily(years=6)`). 상장 이력이 짧은 종목은
+  월봉 MA60이 안 잡혀 해당 라인이 생략됩니다.
+- **카카오 리프레시 토큰**: 약 2개월마다 만료됩니다. 만료 시 재발급 후 Secret 갱신.
+
+## 파라미터 튜닝 (`signals.py` 의 `SignalConfig`)
+- `flat_threshold_pct` (기본 0.3): MA5 방향 '보합' 판정 폭. 고변동 테마주는 0.5~0.8로.
+- `touch_tol_pct` (기본 0.8): 5일선 '터치' 인정 오차. 크게 하면 터치 알람이 자주 뜸.
+- `cross_lookback` (기본 3): 최근 몇 봉 내 크로스를 '발생'으로 볼지.
+- `vol_ma_period` (기본 5): 거래량 이동평균 기간.
+
+## 스케줄 참고
+| 베트남(ICT) | 한국(KST) | UTC(cron) |
+|---|---|---|
+| 05 07 09 11 13 15 17 19 | 07 09 11 13 15 17 19 21 | 22 00 02 04 06 08 10 12 |
+
+한국장(09:00~15:30 KST) = 베트남 07:00~13:30 이라, 07·09·11·13시 브리핑이 장중을 커버합니다.

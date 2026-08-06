@@ -1,0 +1,41 @@
+name: portfolio-briefing
+
+on:
+  schedule:
+    # UTC 기준. 베트남(ICT, UTC+7) 05/07/09/11/13/15/17/19시 = UTC 22/00/02/04/06/08/10/12시
+    - cron: "0 0,2,4,6,8,10,12,22 * * *"
+  workflow_dispatch:      # 수동 실행 버튼
+
+concurrency:
+  group: briefing
+  cancel-in-progress: false
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run briefing
+        env:
+          KAKAO_REST_KEY:      ${{ secrets.KAKAO_REST_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          KAKAO_ACCESS_TOKEN:  ${{ secrets.KAKAO_ACCESS_TOKEN }}
+          HOLDINGS_PATH:       holdings.json
+        run: python portfolio_briefing.py
+
+# 참고:
+#  - GitHub Actions cron 은 UTC 고정. 베트남/한국은 DST 없어 오프셋 불변이라 안전.
+#  - 스케줄 지연: Actions 무료 러너는 트래픽에 따라 수 분 지연될 수 있음.
+#    봉 마감 직후 정확도가 중요하면 각 cron 을 정각 대신 +2~3분(예: "3 0,2,...")으로.
+#  - 비거래일은 스크립트 내부(is_kr_trading_day)에서 자동 skip.
