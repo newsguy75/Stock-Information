@@ -1,0 +1,67 @@
+name: portfolio-briefing-email
+
+# GitHub Pages 없이 이메일로만 브리핑을 보내는 경량 버전.
+# private 레포에서도 동작. Pages/도메인/public 전환 전부 불필요.
+# (메인 briefing.yml 과 둘 중 하나만 켜서 쓰거나, 둘 다 유지해도 됨)
+
+on:
+  schedule:
+    # 베트남(ICT) 05/07/09/11/13/15/17/19시 = UTC 22/00/02/04/06/08/10/12시
+    - cron: "0 0,2,4,6,8,10,12,22 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: briefing-email
+  cancel-in-progress: false
+
+jobs:
+  email-brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore holdings from secret
+        env:
+          HOLDINGS_JSON: ${{ secrets.HOLDINGS_JSON }}
+        run: |
+          if [ -n "$HOLDINGS_JSON" ]; then
+            printf '%s' "$HOLDINGS_JSON" > holdings.json
+            echo "holdings.json restored from secret"
+          elif [ -f holdings.json ]; then
+            echo "using repo holdings.json"
+          else
+            echo "::error::HOLDINGS_JSON secret 도 없고 holdings.json 도 없음"; exit 1
+          fi
+
+      - name: Run briefing (Kakao + Email, no Pages link)
+        env:
+          KAKAO_REST_KEY:      ${{ secrets.KAKAO_REST_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          KAKAO_ACCESS_TOKEN:  ${{ secrets.KAKAO_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
+          HOLDINGS_PATH:       holdings.json
+          EMAIL_FROM:          ${{ secrets.EMAIL_FROM }}
+          EMAIL_APP_PW:        ${{ secrets.EMAIL_APP_PW }}
+          EMAIL_TO:            ${{ secrets.EMAIL_TO }}
+          # PAGES_URL 없음 → 카카오 '자세히 보기'는 기본 링크, 상세는 이메일 첨부로
+        run: python portfolio_briefing.py --force
+
+      - name: Upload report artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: briefing-html
+          path: report/index.html
+
+# ===== 이메일 설정 (Secrets) =====
+# EMAIL_FROM   : 보내는 Gmail 주소 (예: you@gmail.com)
+# EMAIL_APP_PW : Gmail 앱 비밀번호 16자 (Google 계정 > 보안 > 2단계인증 > 앱 비밀번호)
+# EMAIL_TO     : 받는 주소 (생략 시 EMAIL_FROM 과 동일 = 나에게 보내기)
