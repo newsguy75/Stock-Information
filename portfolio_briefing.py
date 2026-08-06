@@ -1,203 +1,80 @@
 # -*- coding: utf-8 -*-
 """
-portfolio_briefing.py
-=====================
-멀티프레임 포트폴리오 브리핑 (일봉/주봉/월봉 MA 시그널 + 일봉/1시간봉 거래량 알람
-+ 1시간봉 스토캐스틱 동조화/다이버전스) 를 생성하고 카카오톡으로 전송.
+portfolio_briefing.py (v3)
+==========================
+- 수급(외국인/기관/개인 3주체) + 종합 인사이트 판정 + Claude API 코멘트 통합
+- 카카오: 요약 헤더 + 종목별 개별 메시지(200자 이내, 종합판정+코멘트)
+- HTML: 전체 이벤트 요약 + 종목별 카드(차트/수급/판정)
 
-스케줄(베트남 ICT 기준): 05 / 07 / 09 / 11 / 13 / 15 / 17 / 19 시, 1일 8회.
-GitHub Actions cron(UTC): 0 0,2,4,6,8,10,12,22 * * *
-
-실행:  python portfolio_briefing.py            # holdings.json 읽어 전송
-       python portfolio_briefing.py --dry-run   # 전송 없이 콘솔 출력
-       python portfolio_briefing.py --demo       # 더미 데이터로 포맷 확인
+실행:
+  python portfolio_briefing.py            # HTML + 카카오 전송
+  python portfolio_briefing.py --dry-run   # 전송 없이 HTML 생성 + 콘솔
+  python portfolio_briefing.py --demo       # 더미 데이터 (API/수급 off)
+환경변수:
+  ANTHROPIC_API_KEY  (있으면 API 코멘트, 없으면 규칙 코멘트)
+  KAKAO_REST_KEY / KAKAO_REFRESH_TOKEN / KAKAO_ACCESS_TOKEN
+  PAGES_URL          (카카오 메시지에 붙일 상세 링크)
 """
 from __future__ import annotations
-import os
-import sys
-import json
-import time
+import os, json, time, argparse
 import datetime as dt
-import argparse
 import requests
-import pandas as pd
 
 import data_feed as feed
-from signals import (SignalConfig, compute_ma_signal, compute_volume_signal,
-                     to_weekly, to_monthly)
-from mtf_stoch_scanner import (stochastic, analyze_mtf_sync, detect_divergence,
-                               resample_ohlcv)
+from report_html import build_html, analyze_stock, one_line_summary_from
+from indices import fetch_indices
 
-CFG = SignalConfig()
 HOLDINGS_PATH = os.environ.get("HOLDINGS_PATH", "holdings.json")
-
-# 이모지 표기
-DIR_ICON = {"상향": "🔺", "보합": "➖", "하향": "🔻"}
-ALIGN_ICON = {"정배열": "✅정배열", "역배열": "⛔역배열", "혼조": "〰️혼조"}
+REPORT_DIR = os.environ.get("REPORT_DIR", "report")
+PAGES_URL = os.environ.get("PAGES_URL", "")
 
 
-# ----------------------------------------------------------------------
-# 프레임별 MA 라인 포맷
-# ----------------------------------------------------------------------
-def _ma_block(label: str, sig, show_touch: bool = True) -> str:
-    parts = [f"{label} MA5 {DIR_ICON[sig.ma5_direction]}{sig.ma5_direction}"
-             f"({sig.ma5_slope_pct:+.1f}%) | {ALIGN_ICON[sig.alignment]}"]
-    crosses = []
-    if sig.cross_5_20:
-        crosses.append(f"5·20 {sig.cross_5_20}")
-    if sig.cross_20_60:
-        crosses.append(f"20·60 {sig.cross_20_60}")
-    if sig.cross_5_60:
-        crosses.append(f"5·60 {sig.cross_5_60}")
-    if crosses:
-        parts.append("  ⚡" + ", ".join(crosses))
-    if show_touch and sig.above_ma5 and sig.ma5_touch:
-        parts.append("  🎯5일선 지지터치(눌림)")
-    return "\n".join(parts)
-
-
-def _vol_block(label: str, vsig) -> str:
-    if vsig.over_vol_ma:
-        return f"{label} 거래량 🚨5일선 돌파 (x{vsig.ratio:.1f})"
-    return f"{label} 거래량 5일선 이내 (x{vsig.ratio:.1f})"
-
-
-# ----------------------------------------------------------------------
-# 종목 1개 리포트
-# ----------------------------------------------------------------------
-def build_stock_report(name: str, code: str, demo: bool = False) -> tuple[str, list[str]]:
-    """
-    반환: (본문 텍스트, 알람 리스트)
-    알람 리스트: 거래량 돌파·크로스 발생·5일선 터치 등 '즉시 주목' 항목
-    """
-    alerts: list[str] = []
-
-    # --- 데이터 수집 ---
-    if demo:
-        daily = feed.dummy_daily(seed=abs(hash(code)) % 1000)
-        hourly = feed.dummy_hourly(seed=abs(hash(code)) % 1000)
-    else:
-        daily = feed.fetch_daily(code, years=6)
-        hourly = feed.fetch_hourly(code)
-
-    if len(daily) < 70:
-        return f"● {name}({code}): 데이터 부족(일봉 {len(daily)}봉)", alerts
-
-    weekly = to_weekly(daily)
-    monthly = to_monthly(daily)
-
-    # --- 일봉 ---
-    d_ma = compute_ma_signal(daily, CFG)
-    d_vol = compute_volume_signal(daily, CFG)
-    # --- 주봉 / 월봉 ---
-    w_ma = compute_ma_signal(weekly, CFG) if len(weekly) >= 70 else None
-    m_ma = compute_ma_signal(monthly, CFG) if len(monthly) >= 62 else None
-
-    last_close = daily["close"].iloc[-1]
-    prev_close = daily["close"].iloc[-2]
-    chg = (last_close - prev_close) / prev_close * 100
-
-    lines = [f"● {name}({code})  {last_close:,.0f}원 ({chg:+.2f}%)"]
-    lines.append(_ma_block("[일]", d_ma))
-    lines.append(_vol_block("[일]", d_vol))
-    if w_ma:
-        lines.append(_ma_block("[주]", w_ma))
-    if m_ma:
-        lines.append(_ma_block("[월]", m_ma))
-
-    # --- 1시간봉 ---
-    if len(hourly) >= 70:
-        h_ma = compute_ma_signal(hourly, CFG)
-        h_vol = compute_volume_signal(hourly, CFG)
-        lines.append(f"[1H] MA5 {DIR_ICON[h_ma.ma5_direction]}{h_ma.ma5_direction} "
-                     f"| {ALIGN_ICON[h_ma.alignment]}")
-        lines.append(_vol_block("[1H]", h_vol))
-        if h_vol.over_vol_ma:
-            alerts.append(f"{name} 1H 거래량 5봉선 돌파 x{h_vol.ratio:.1f}")
-
-        # 스토캐스틱 멀티프레임 동조화 + 다이버전스
-        try:
-            frames = {"60min": hourly}
-            # 1시간봉 원천에서 하위프레임을 못 만들면 스토캐스틱은 60분 단일로만
-            sync = analyze_mtf_sync(
-                {"60min": hourly}, anchor_tf="60min",
-                stoch_params={"60min": (24, 5, 5)},
-            )
-            if sync and sync[-1].anchor_turn:
-                at = sync[-1].anchor_turn
-                lines.append(f"[1H] 스토캐 상승전환 {at.from_zone} (%K {at.k_value:.0f})")
-            divs = detect_divergence(hourly, stochastic(hourly))
-            if divs:
-                d = divs[-1]
-                tag = "🟢상승" if d.type == "bullish" else "🔴하락"
-                lines.append(f"[1H] {tag}다이버전스 감지")
-                alerts.append(f"{name} 1H {tag}다이버전스")
-        except Exception as e:
-            lines.append(f"[1H] 스토캐 계산 skip ({e})")
-    else:
-        lines.append("[1H] 데이터 수집 실패/부족")
-
-    # --- 알람 취합 ---
-    if d_vol.over_vol_ma:
-        alerts.append(f"{name} 일봉 거래량 5일선 돌파 x{d_vol.ratio:.1f}")
-    for lbl, s in [("일", d_ma), ("주", w_ma), ("월", m_ma)]:
-        if s is None:
-            continue
-        if s.cross_5_20 == "골든크로스" or s.cross_20_60 == "골든크로스":
-            alerts.append(f"{name} {lbl}봉 골든크로스")
-        if s.cross_5_20 == "데드크로스" or s.cross_20_60 == "데드크로스":
-            alerts.append(f"{name} {lbl}봉 데드크로스")
-        if s.above_ma5 and s.ma5_touch:
-            alerts.append(f"{name} {lbl}봉 5일선 지지터치")
-
-    return "\n".join(lines), alerts
-
-
-# ----------------------------------------------------------------------
-# 전체 브리핑 조립
-# ----------------------------------------------------------------------
-def build_briefing(holdings: list[dict], demo: bool = False) -> str:
-    now_ict = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=7)
-    header = f"📊 포트폴리오 브리핑 (VN {now_ict:%m/%d %H:%M})\n" + "─" * 22
-    body_blocks, all_alerts = [], []
-
+def collect(holdings, demo=False):
+    results, summaries = [], []
+    use_api = bool(os.environ.get("ANTHROPIC_API_KEY")) and not demo
     for h in holdings:
         name = h.get("name", h.get("code", "?"))
         code = h.get("code", "")
         if not code:
             continue
         try:
-            block, alerts = build_stock_report(name, code, demo=demo)
+            if demo:
+                daily = feed.dummy_daily(seed=abs(hash(code)) % 1000)
+                hourly = feed.dummy_hourly(seed=abs(hash(code)) % 1000)
+            else:
+                daily = feed.fetch_daily(code, years=6)
+                hourly = feed.fetch_hourly(code)
+            if len(daily) < 70:
+                summaries.append(f"⚪ {name} 데이터 부족")
+                continue
+            res = analyze_stock(name, code, daily, hourly=hourly, use_api=use_api)
+            results.append(res)
+            summaries.append(one_line_summary_from(res)[0])
         except Exception as e:
-            block, alerts = f"● {name}({code}): 오류 {e}", []
-        body_blocks.append(block)
-        all_alerts.extend(alerts)
+            summaries.append(f"⚪ {name}({code}) 오류: {e}")
         if not demo:
-            time.sleep(0.4)   # 네이버/FDR 과호출 방지
-
-    parts = [header]
-    if all_alerts:
-        parts.append("🔔 즉시 알람\n" + "\n".join(f" • {a}" for a in all_alerts))
-        parts.append("─" * 22)
-    parts.append("\n\n".join(body_blocks))
-    return "\n".join(parts)
+            time.sleep(0.5)
+    return results, summaries
 
 
-# ----------------------------------------------------------------------
-# 카카오톡 전송 (나에게 보내기)
-# ----------------------------------------------------------------------
-def refresh_access_token() -> str | None:
-    """리프레시 토큰으로 액세스 토큰 갱신 (약 2개월마다 리프레시 토큰 만료)."""
+def save_html(results, index_views=None) -> str:
+    os.makedirs(REPORT_DIR, exist_ok=True)
+    html = build_html(results, index_views=index_views or [])
+    path = os.path.join(REPORT_DIR, "index.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+    return path
+
+
+def refresh_access_token():
     rest_key = os.environ.get("KAKAO_REST_KEY")
     refresh = os.environ.get("KAKAO_REFRESH_TOKEN")
     if not (rest_key and refresh):
         return os.environ.get("KAKAO_ACCESS_TOKEN")
     try:
         r = requests.post("https://kauth.kakao.com/oauth/token", data={
-            "grant_type": "refresh_token",
-            "client_id": rest_key,
-            "refresh_token": refresh,
-        }, timeout=10)
+            "grant_type": "refresh_token", "client_id": rest_key,
+            "refresh_token": refresh}, timeout=10)
         r.raise_for_status()
         return r.json().get("access_token")
     except Exception as e:
@@ -205,66 +82,52 @@ def refresh_access_token() -> str | None:
         return os.environ.get("KAKAO_ACCESS_TOKEN")
 
 
-def send_kakao(text: str) -> bool:
-    """카카오 '나와의 채팅방'으로 텍스트 메시지 전송. 4000자 초과 시 분할."""
+def _send_text(token, text, link_url=""):
+    text = text[:195] + "…" if len(text) > 200 else text
+    template = {"object_type": "text", "text": text,
+                "link": {"web_url": link_url or "https://developers.kakao.com"}}
+    r = requests.post("https://kapi.kakao.com/v2/api/talk/memo/default/send",
+                      headers={"Authorization": f"Bearer {token}"},
+                      data={"template_object": json.dumps(template)}, timeout=10)
+    if r.status_code != 200:
+        print(f"[error] 카카오 전송 실패 {r.status_code}: {r.text[:200]}")
+        return False
+    return True
+
+
+def send_kakao(results, summaries, link_url=""):
     token = refresh_access_token()
     if not token:
         print("[error] 카카오 토큰 없음 — 전송 skip")
         return False
-    url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    headers = {"Authorization": f"Bearer {token}"}
-    ok = True
-    for chunk in _split(text, 3800):
-        template = {
-            "object_type": "text",
-            "text": chunk,
-            "link": {"web_url": "https://finance.naver.com"},
-        }
-        try:
-            r = requests.post(url, headers=headers,
-                              data={"template_object": json.dumps(template)}, timeout=10)
-            if r.status_code != 200:
-                print(f"[error] 카카오 전송 실패 {r.status_code}: {r.text[:200]}")
-                ok = False
-        except Exception as e:
-            print(f"[error] 카카오 전송 예외: {e}")
-            ok = False
-        time.sleep(0.3)
-    return ok
+    now = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=7)
+    buy = sum(1 for r in results if r["verdict"].stance == "매수우위")
+    cut = sum(1 for r in results if r["verdict"].stance == "비중축소")
+    ev = sum(1 for r in results if r["events"])
+    head = f"📊 브리핑 {now:%m/%d %H:%M}\n🔴매수우위 {buy} · 🔵비중축소 {cut} · 이벤트 {ev}"
+    if link_url:
+        head += f"\n상세: {link_url}"
+    _send_text(token, head, link_url); time.sleep(0.35)
+    for s in summaries:
+        _send_text(token, s, link_url); time.sleep(0.35)
+    return True
 
 
-def _split(text: str, limit: int) -> list[str]:
-    out, buf = [], ""
-    for line in text.split("\n"):
-        if len(buf) + len(line) + 1 > limit:
-            out.append(buf)
-            buf = ""
-        buf += line + "\n"
-    if buf:
-        out.append(buf)
-    return out
-
-
-# ----------------------------------------------------------------------
-# 엔트리포인트
-# ----------------------------------------------------------------------
-def load_holdings() -> list[dict]:
+def load_holdings():
     with open(HOLDINGS_PATH, encoding="utf-8") as f:
         data = json.load(f)
-    # holdings.json 이 리스트이거나 {"holdings":[...]} 둘 다 허용
     return data["holdings"] if isinstance(data, dict) else data
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true", help="전송 없이 콘솔 출력")
-    ap.add_argument("--demo", action="store_true", help="더미 데이터로 포맷 확인")
-    ap.add_argument("--force", action="store_true", help="비거래일에도 실행")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
 
     if not args.demo and not args.force and not feed.is_kr_trading_day():
-        print("비거래일 — 브리핑 skip (강제: --force)")
-        return
+        print("비거래일 — skip (강제: --force)"); return
 
     if args.demo:
         holdings = [{"name": "TK Corporation", "code": "023160"},
@@ -273,12 +136,14 @@ def main():
     else:
         holdings = load_holdings()
 
-    text = build_briefing(holdings, demo=args.demo)
-
+    results, summaries = collect(holdings, demo=args.demo)
+    index_views = [] if args.demo else fetch_indices()
+    path = save_html(results, index_views=index_views)
+    print(f"HTML 저장: {path}")
     if args.dry_run or args.demo:
-        print(text)
+        print("\n".join(summaries))
     else:
-        send_kakao(text)
+        send_kakao(results, summaries, link_url=PAGES_URL)
 
 
 if __name__ == "__main__":
