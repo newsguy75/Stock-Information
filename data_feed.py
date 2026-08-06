@@ -78,10 +78,11 @@ def fetch_daily(code: str, years: float = 1.0) -> pd.DataFrame:
 # ----------------------------------------------------------------------
 # 월봉 계산 전용 소스 (기본 3년 = 36개월)
 # ----------------------------------------------------------------------
-def fetch_monthly_source(code: str, years: float = 3.0) -> pd.DataFrame:
-    """월봉 리샘플용 일봉 소스. 3년(=36개월)이면 월봉 MA5/20과
-    다이버전스 피벗 탐지에 필요한 최소한의 여유는 확보됨.
-    월봉 MA60(=60개월=5년)은 이 기간으로는 계산되지 않고 자동 생략됨.
+def fetch_monthly_source(code: str, years: float = 5.0) -> pd.DataFrame:
+    """월봉 리샘플용 일봉 소스. 기본 5년(=60개월)으로 월봉 MA60까지 형성 가능.
+    (요청 반영: 3년→5년). 상장 이력이 짧은 종목은 확보 가능한 만큼만 반환되고
+    MA60은 자동 생략됨. 데이터량이 늘어 타임아웃이 재발하면 MONTHLY_YEARS 를
+    4 등으로 낮춰 조정.
     """
     try:
         df = fetch_daily_fdr(code, years)
@@ -181,8 +182,8 @@ def dummy_daily(seed: int = 1, n: int = 245) -> pd.DataFrame:
     }, index=rng)
 
 
-def dummy_monthly_source(seed: int = 1, n: int = 735) -> pd.DataFrame:
-    """3년치(약 735 거래일) 더미 - 월봉 리샘플 테스트용."""
+def dummy_monthly_source(seed: int = 1, n: int = 1225) -> pd.DataFrame:
+    """5년치(약 1225 거래일) 더미 - 월봉 리샘플 테스트용(MA60 형성 가능)."""
     return dummy_daily(seed=seed + 500, n=n)
 
 

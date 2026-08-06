@@ -29,18 +29,119 @@ import data_feed as feed
 from signals import to_weekly, to_monthly
 from analysis_engine import analyze_stock
 from report_writer import save_report, write_day_index, _dir_color
+from market_index import build_market_summary
 
 HOLDINGS_PATH = os.environ.get("HOLDINGS_PATH", "holdings.json")
 DAILY_YEARS = float(os.environ.get("DAILY_YEARS", "1"))
-MONTHLY_YEARS = float(os.environ.get("MONTHLY_YEARS", "3"))
+MONTHLY_YEARS = float(os.environ.get("MONTHLY_YEARS", "5"))
 
 
 def _verdict_icon(verdict: str) -> str:
+    # (하위호환용) 판정 기준 아이콘
     if any(w in verdict for w in ["상승", "반등"]):
         return "🔴"
     if any(w in verdict for w in ["하락", "주의", "관망", "약세"]):
         return "🔵"
     return "⚪"
+
+
+def _chg_icon(chg: float) -> str:
+    # 등락률 기준 아이콘 (상승🔴 / 보합⚪ / 하락🔵)
+    if chg > 0.05:
+        return "🔴"
+    if chg < -0.05:
+        return "🔵"
+    return "⚪"
+
+
+def build_stock_message(analysis: dict) -> str:
+    """종목 1개 카톡 메시지 (스크린샷 포맷).
+    🔴 종목명 가격(등락%) [판정 +score] [판정] 핵심시그널 나열
+    """
+    name = analysis["name"]
+    dv = analysis["daily_verdict"]
+    chg = analysis["change_pct"]
+    icon = _chg_icon(chg)
+    price = analysis["price"]
+
+    # 하락 경고 우선 표기 (일봉 하락다이버전스/쌍봉/데드캣바운스)
+    bear = analysis.get("bear_warnings", {})
+    bear_line = ""
+    if bear.get("has_warning"):
+        kinds = [w["kind"] for w in bear["warnings"]]
+        bear_line = "🚨 " + ", ".join(kinds) + "\n"
+
+    # 판정 라벨 (score 구간별 세분화)
+    score = dv["score"]
+    if score >= 4:
+        tag = "적극매수"
+    elif score >= 2:
+        tag = "매수우위"
+    elif score >= 1:
+        tag = "매수관심"
+    elif score == 0:
+        tag = "관망"
+    elif score >= -2:
+        tag = "주의"
+    else:
+        tag = "매도관심"
+
+    # 호재 시그널 (긍정)
+    pos_sigs, neg_sigs = [], []
+    for frame in ["월봉", "일봉", "1H"]:
+        d = analysis["divergence"].get(frame, {})
+        if d.get("found"):
+            if d["type"] == "상승":
+                pos_sigs.append(f"{frame} 상승다이버전스")
+            else:
+                neg_sigs.append(f"{frame} 하락다이버전스")
+    # 월봉 과매도권 상승전환 (호재)
+    ms = analysis["stoch_frames"]["monthly"]
+    for k in ["장기", "중기", "단기"]:
+        node = ms.get(k, {})
+        if node.get("ok") and node.get("zone") == "과매도" and node.get("direction") == "상승":
+            pos_sigs.append("월봉 과매도권 상승전환")
+            break
+    # 이평 (호재/악재)
+    ma = analysis["ma"]
+    if ma.get("ok"):
+        if ma.get("forecast"):
+            if "골든크로스" in ma["forecast"]:
+                pos_sigs.append("일봉 5·20 골든크로스 임박")
+            elif "데드크로스" in ma["forecast"]:
+                neg_sigs.append("일봉 5·20 데드크로스 우려")
+        f5 = ma.get("ma5_forecast", {})
+        if f5.get("ok"):
+            if f5["direction"] == "상승":
+                pos_sigs.append("MA5 상향")
+            elif f5["direction"] == "하락":
+                neg_sigs.append("MA5 하향")
+        if ma.get("note") and "눌림" in ma["note"]:
+            pos_sigs.append("5일선 지지터치(눌림목)")
+    # 눌림목 매수 신호
+    pb = analysis.get("pullback", {})
+    if pb.get("ok") and pb.get("has_signal"):
+        s = pb["signals"][0]
+        pos_sigs.append(f"{s['line']} 눌림목(손절 {s['stop']:,})")
+    # 공매도 (악재/호재)
+    sh = analysis["shorting"]
+    if sh.get("ok"):
+        d5t = sh.get("d5", {}).get("trend", "")
+        if "상승" in d5t:
+            neg_sigs.append("공매도 5일↑")
+
+    # 호재 위주로 표기, 악재는 뒤에 ⚠로
+    line2 = f"[{tag}]"
+    if pos_sigs:
+        line2 += " " + ", ".join(pos_sigs[:4])
+    if neg_sigs:
+        line2 += (" ⚠" if pos_sigs else " ") + ", ".join(neg_sigs[:3])
+    if not pos_sigs and not neg_sigs:
+        # 다이버전스/크로스 같은 이벤트가 없으면 판정 근거를 대신 표시
+        reasons = dv.get("reasons", [])
+        line2 += " " + (", ".join(reasons[:4]) if reasons else "특이신호 없음")
+
+    return (f"{bear_line}{icon} {name} {price:,}({chg:+.1f}%) [{tag} {score:+d}]\n{line2}")
 
 
 def process_stock(name: str, code: str, now_vn: dt.datetime, demo: bool = False):
@@ -59,7 +160,8 @@ def process_stock(name: str, code: str, now_vn: dt.datetime, demo: bool = False)
     monthly = to_monthly(monthly_src) if len(monthly_src) >= 250 else to_monthly(daily)
 
     analysis = analyze_stock(name, code, daily, monthly, hourly, demo=demo)
-    save_report(analysis, now_vn)
+    saved = save_report(analysis, now_vn)
+    analysis["_html_path"] = saved.get("html")
 
     dv = analysis["daily_verdict"]
     icon = _verdict_icon(dv["verdict"])
@@ -75,8 +177,9 @@ def process_stock(name: str, code: str, now_vn: dt.datetime, demo: bool = False)
     ma = analysis["ma"]
     if ma.get("ok") and ma.get("forecast") and "골든크로스" in ma["forecast"]:
         alerts.append(f"{name} 골든크로스 임박")
-    if analysis["shorting"].get("ok") and analysis["shorting"].get("short_5d_trend") == "상승":
-        alerts.append(f"{name} 공매도 비중 상승")
+    sh = analysis["shorting"]
+    if sh.get("ok") and "상승" in sh.get("d5", {}).get("trend", ""):
+        alerts.append(f"{name} 공매도 5일 상승")
 
     return analysis, summary_line, alerts
 
@@ -114,17 +217,14 @@ def refresh_access_token():
         return os.environ.get("KAKAO_ACCESS_TOKEN")
 
 
-def send_kakao(text):
-    token = refresh_access_token()
-    if not token:
-        print("[error] 카카오 토큰 없음 — 전송 skip")
-        return False
+def send_kakao_message(text, token, link_url=None):
+    """단일 메시지 전송 (토큰 재사용). 4000자 초과 시 분할."""
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     headers = {"Authorization": f"Bearer {token}"}
     ok = True
     for chunk in _split(text, 3800):
         template = {"object_type": "text", "text": chunk,
-                    "link": {"web_url": "https://finance.naver.com"}}
+                    "link": {"web_url": link_url or "https://finance.naver.com"}}
         try:
             r = requests.post(url, headers=headers,
                               data={"template_object": json.dumps(template)}, timeout=10)
@@ -136,6 +236,15 @@ def send_kakao(text):
             ok = False
         time.sleep(0.3)
     return ok
+
+
+def send_kakao(text):
+    """호환용: 단건 전송 (토큰 자동 발급)."""
+    token = refresh_access_token()
+    if not token:
+        print("[error] 카카오 토큰 없음 — 전송 skip")
+        return False
+    return send_kakao_message(text, token)
 
 
 def _split(text, limit):
@@ -174,38 +283,76 @@ def main():
         holdings = load_holdings()
 
     now_vn = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=7)
+    pages_base = os.environ.get("PAGES_BASE_URL")
 
-    analyses, summaries, all_alerts = [], [], []
+    # --- 1) 시황 요약 (KOSPI/KOSDAQ) ---
+    market_text = build_market_summary(demo=args.demo)
+
+    # --- 2) 종목별 분석 + 저장 + 개별 메시지 준비 ---
+    analyses = []
+    stock_messages = []   # [(메시지, 상세링크)]
     for h in holdings:
         name = h.get("name", h.get("code", "?"))
         code = h.get("code", "")
         if not code:
             continue
         try:
-            analysis, line, alerts = process_stock(name, code, now_vn, demo=args.demo)
+            analysis, _line, _alerts = process_stock(name, code, now_vn, demo=args.demo)
         except Exception as e:
-            analysis, line, alerts = None, f"● {name}: 오류 {e}", []
+            analysis = None
+            stock_messages.append((f"● {name}: 오류 {e}", None))
         if analysis:
             analyses.append(analysis)
-        summaries.append(line)
-        all_alerts.extend(alerts)
+            msg = build_stock_message(analysis)
+            safe = name.replace(" ", "-").replace("/", "-")
+            link = (f"{pages_base}/data/latest/{code}_{safe}.html"
+                    if pages_base else None)
+            stock_messages.append((msg, link))
         if not args.demo:
             time.sleep(0.4)
 
-    index_url = None
     if analyses:
         write_day_index(analyses, now_vn)
-        pages_base = os.environ.get("PAGES_BASE_URL")
-        if pages_base:
-            index_url = f"{pages_base}/data/{now_vn:%Y-%m-%d}/index.html"
 
-    text = build_summary_text(summaries, all_alerts, now_vn, index_url)
+    # 첨부용 HTML 파일 경로 수집 (+ 그날 index)
+    html_files = [a["_html_path"] for a in analyses if a.get("_html_path")]
+    index_path = os.path.join(os.environ.get("DATA_ROOT", "data"),
+                              now_vn.strftime("%Y-%m-%d"), "index.html")
+    if os.path.exists(index_path):
+        html_files = [index_path] + html_files
 
+    # --- 3) 출력 or 전송 ---
     if args.dry_run or args.demo:
-        print(text)
-        print("\n[저장 완료] data/ 폴더 확인")
+        print(market_text)
+        print()
+        for msg, link in stock_messages:
+            print(msg)
+            if link:
+                print(f"  🔗 {link}")
+            print()
+        print(f"[저장 완료] data/ 폴더 · HTML {len(html_files)}개")
+        # 이메일 미리보기 (전송은 안 함)
+        if os.environ.get("GMAIL_USER"):
+            print("[dry-run] GMAIL_USER 설정됨 — 실행 시 이메일 발송됨")
+        return
+
+    # 카카오: 시황요약 먼저 → 종목별 개별
+    token = refresh_access_token()
+    if token:
+        send_kakao_message(market_text, token)
+        time.sleep(0.5)
+        for msg, link in stock_messages:
+            send_kakao_message(msg, token, link_url=link)
+            time.sleep(0.5)
     else:
-        send_kakao(text)
+        print("[error] 카카오 토큰 없음 — 카톡 전송 skip")
+
+    # 이메일: HTML 리포트 첨부 발송 (기존 스케줄러에서 함께 실행)
+    try:
+        from emailer import send_email
+        send_email(analyses, market_text, html_files, now_vn)
+    except Exception as e:
+        print(f"[warn] 이메일 발송 예외: {e}")
 
 
 if __name__ == "__main__":

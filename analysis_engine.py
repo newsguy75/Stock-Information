@@ -77,7 +77,8 @@ def analyze_stoch_frames(hourly: pd.DataFrame, daily: pd.DataFrame,
     out["daily"]["장기"] = _stoch_dir(daily, 20, 10, 10)
     out["daily"]["중기"] = _stoch_dir(daily, 10, 5, 5)
     out["daily"]["단기"] = _stoch_dir(daily, 5, 3, 3)
-    # --- 월봉 (12개월 한계) ---
+    # --- 월봉 (5년=60개월 확보 시 장기까지) ---
+    out["monthly"]["장기"] = _stoch_dir(monthly, 20, 10, 10)
     out["monthly"]["중기"] = _stoch_dir(monthly, 10, 5, 5)
     out["monthly"]["단기"] = _stoch_dir(monthly, 5, 3, 3)
 
@@ -128,53 +129,233 @@ def _stoch_verdict(out: dict) -> dict:
 
 
 # ======================================================================
-# 4. 이평선 분석 (골든크로스 근접도 + N일 뒤 예측)
+# 2-B. 하락 경고 신호 (하락다이버전스 / 데드캣바운스 / 쌍봉) — 최우선 강조
 # ======================================================================
+def detect_double_top(daily: pd.DataFrame, lookback: int = 60,
+                       tol_pct: float = 3.0) -> dict:
+    """쌍봉(더블탑): 최근 구간에서 비슷한 높이의 고점 2개 + 사이 골 + 현재 하락.
+    두 고점 차이가 tol_pct 이내이고, 두 번째 고점 이후 하락 중이면 쌍봉."""
+    df = daily.tail(lookback)
+    if len(df) < 20:
+        return {"found": False}
+    high = df["high"].values
+    close = df["close"]
+    # 피벗 고점 찾기 (order=3)
+    piv = []
+    for i in range(3, len(high) - 3):
+        if high[i] == max(high[i-3:i+4]):
+            piv.append(i)
+    if len(piv) < 2:
+        return {"found": False}
+    i1, i2 = piv[-2], piv[-1]
+    h1, h2 = high[i1], high[i2]
+    # 두 고점 높이 유사 + 사이에 골 존재 + 현재가 두번째 고점보다 아래
+    if abs(h1 - h2) / max(h1, h2) * 100 <= tol_pct:
+        valley = min(high[i1:i2]) if i2 > i1 else h1
+        neckline = float(df["low"].iloc[i1:i2+1].min())
+        cur = float(close.iloc[-1])
+        if cur < h2 and (h2 - valley) / h2 * 100 > 2:
+            broke = cur < neckline
+            return {"found": True,
+                    "peak1_date": str(df.index[i1].date()),
+                    "peak2_date": str(df.index[i2].date()),
+                    "peak_level": round((h1 + h2) / 2),
+                    "neckline": round(neckline),
+                    "broke_neckline": broke,
+                    "desc": (f"쌍봉 고점 {h1:,.0f}/{h2:,.0f} · 넥라인 {neckline:,.0f}"
+                             + (" 이탈(하락 확정 신호)" if broke else " 근접(이탈 시 하락 가속)"))}
+    return {"found": False}
+
+
+def detect_dead_cat_bounce(daily: pd.DataFrame, stoch_daily: dict = None) -> dict:
+    """데드캣바운스: 급락 후 단기 반등이나 추세 회복 실패 징후.
+    - 최근 20일 내 큰 낙폭(고점 대비 -15%↑)
+    - 직후 소폭 반등(저점 대비 반등)
+    - 그러나 20일선 아래 + 반등 거래량 미약 → 진성 반등 아닐 가능성."""
+    df = daily.tail(30)
+    if len(df) < 20:
+        return {"found": False}
+    close = df["close"]
+    ma20 = close.rolling(20).mean()
+    recent_high = close.iloc[-20:].max()
+    recent_low = close.iloc[-20:].min()
+    cur = float(close.iloc[-1])
+    low_idx = close.iloc[-20:].idxmin()
+
+    drop_pct = (recent_high - recent_low) / recent_high * 100
+    bounce_pct = (cur - recent_low) / recent_low * 100 if recent_low else 0
+    below_ma20 = pd.notna(ma20.iloc[-1]) and cur < ma20.iloc[-1]
+
+    # 급락(-15%↑) + 소폭 반등(3~15%) + 20일선 아래 = 데드캣바운스 의심
+    if drop_pct >= 15 and 3 <= bounce_pct <= 15 and below_ma20:
+        # 반등 거래량 확인 (반등 구간 거래량이 하락 구간보다 약하면 신뢰↓)
+        weak_vol = ""
+        try:
+            vol = df["volume"]
+            after_low = vol.loc[low_idx:]
+            before_low = vol.loc[:low_idx]
+            if len(after_low) and len(before_low) and after_low.mean() < before_low.mean() * 0.8:
+                weak_vol = " · 반등 거래량 미약(신뢰 낮음)"
+        except Exception:
+            pass
+        return {"found": True,
+                "drop_pct": round(drop_pct, 1), "bounce_pct": round(bounce_pct, 1),
+                "desc": (f"급락 -{drop_pct:.0f}% 후 +{bounce_pct:.0f}% 반등이나 "
+                         f"20일선 하회{weak_vol} → 데드캣바운스 경계")}
+    return {"found": False}
+
+
+def build_bear_warnings(daily: pd.DataFrame, div: dict, stoch_daily: dict) -> dict:
+    """일봉 기준 하락 경고를 모아 최우선 강조용으로 반환."""
+    warnings = []
+
+    # 1) 일봉 하락다이버전스 (최우선)
+    dd = div.get("일봉", {})
+    if dd.get("found") and dd.get("type") == "하락":
+        warnings.append({
+            "kind": "하락다이버전스",
+            "level": "높음",
+            "date": dd.get("to_date", ""),
+            "desc": f"일봉 하락다이버전스 [{dd.get('to_date','')}] — {dd.get('basis','')}"
+        })
+
+    # 2) 쌍봉
+    dt_ = detect_double_top(daily)
+    if dt_.get("found"):
+        warnings.append({
+            "kind": "쌍봉(더블탑)",
+            "level": "높음" if dt_.get("broke_neckline") else "주의",
+            "date": dt_.get("peak2_date", ""),
+            "desc": dt_["desc"]
+        })
+
+    # 3) 데드캣바운스
+    dcb = detect_dead_cat_bounce(daily, stoch_daily)
+    if dcb.get("found"):
+        warnings.append({
+            "kind": "데드캣바운스",
+            "level": "주의",
+            "date": "",
+            "desc": dcb["desc"]
+        })
+
+    # 4) 일봉 단기 스토캐 과매수권 하락전환 (보조 경고)
+    if stoch_daily:
+        ds = stoch_daily.get("단기", {})
+        if ds.get("ok") and ds.get("zone") == "과매수" and ds.get("direction") == "하락":
+            warnings.append({
+                "kind": "과매수 하락전환",
+                "level": "주의",
+                "date": "",
+                "desc": f"일봉 단기 스토캐 과매수권 하락전환(K{ds.get('k')})"
+            })
+
+    return {"has_warning": len(warnings) > 0, "warnings": warnings}
+
+
+# ======================================================================
+# 4. 이평선 분석 (5/20/60일선 + 크로스 근접 + 5·20 방향 예측 1~3일)
+# ======================================================================
+def _ma_slope_forecast(ma_series: pd.Series, horizon: int = 3) -> dict:
+    """이평선의 최근 기울기로 N일 후 방향 예측.
+    최근 5봉 선형회귀 기울기(원/일)를 구해 1~3일 뒤 값과 방향을 추정."""
+    s = ma_series.dropna()
+    if len(s) < 6:
+        return {"ok": False}
+    y = s.iloc[-5:].values
+    x = np.arange(len(y))
+    # 1차 회귀 (기울기 = 원/일)
+    slope, intercept = np.polyfit(x, y, 1)
+    now = float(s.iloc[-1])
+    slope_pct = slope / now * 100 if now else 0.0  # %/일
+    if slope_pct > 0.15:
+        direction = "상승"
+    elif slope_pct < -0.15:
+        direction = "하락"
+    else:
+        direction = "보합"
+    proj = {}
+    for d in range(1, horizon + 1):
+        val = now + slope * d
+        proj[f"{d}일후"] = round(val)
+    return {"ok": True, "direction": direction, "slope_pct": round(slope_pct, 2),
+            "now": round(now), "proj": proj}
+
+
 def analyze_ma(daily: pd.DataFrame, lookback_days: int = 60) -> dict:
-    """일봉 5/20 이평 위치 + 골든/데드크로스 근접도 및 도달 예상일."""
-    df = daily.tail(max(lookback_days, 25))
+    """일봉 5/20/60 이평 위치 + 골든/데드크로스 근접도 + 5·20 방향예측(1~3일)."""
+    # 60일선 계산엔 최소 60봉 + 방향추정 여유 필요
+    df = daily.tail(max(lookback_days + 10, 75))
     close = df["close"]
     ma5 = close.rolling(5).mean()
     ma20 = close.rolling(20).mean()
+    ma60 = close.rolling(60).mean()
     if pd.isna(ma5.iloc[-1]) or pd.isna(ma20.iloc[-1]):
         return {"ok": False}
 
     px = float(close.iloc[-1])
     m5, m20 = float(ma5.iloc[-1]), float(ma20.iloc[-1])
+    m60 = float(ma60.iloc[-1]) if pd.notna(ma60.iloc[-1]) else None
+
     pos = []
     pos.append("5일선 위" if px >= m5 else "5일선 아래")
     pos.append("20일선 위" if px >= m20 else "20일선 아래")
+    if m60 is not None:
+        pos.append("60일선 위" if px >= m60 else "60일선 아래")
 
-    gap_pct = (m5 - m20) / m20 * 100  # 양수면 5일선이 위(정배열 방향)
-    # 최근 5일 gap 변화로 수렴/발산 속도 추정
+    # 정/역배열 (60일선 포함 판정)
+    if m60 is not None:
+        if m5 > m20 > m60:
+            cross_state = "정배열(5>20>60)"
+        elif m5 < m20 < m60:
+            cross_state = "역배열(5<20<60)"
+        else:
+            cross_state = "혼조"
+    else:
+        cross_state = "정배열(5>20)" if m5 > m20 else "역배열(5<20)"
+
+    gap_pct = (m5 - m20) / m20 * 100
     gap_series = ((ma5 - ma20) / ma20 * 100).dropna()
     if len(gap_series) >= 6:
-        recent_slope = (gap_series.iloc[-1] - gap_series.iloc[-6]) / 5  # %/일
+        recent_slope = (gap_series.iloc[-1] - gap_series.iloc[-6]) / 5
     else:
         recent_slope = 0.0
 
-    cross_state = "정배열(5>20)" if gap_pct > 0 else "역배열(5<20)"
     forecast = None
     if gap_pct < 0 and recent_slope > 0.01:
-        # 역배열이나 좁혀지는 중 → 골든크로스까지 며칠?
         days = abs(gap_pct) / recent_slope
         if days <= 15:
-            forecast = f"약 {days:.0f}일 뒤 골든크로스 예상 (현재 갭 {gap_pct:.1f}%, 수렴속도 {recent_slope:.2f}%/일)"
+            forecast = f"약 {days:.0f}일 뒤 5·20 골든크로스 예상 (갭 {gap_pct:.1f}%, 수렴 {recent_slope:.2f}%/일)"
     elif gap_pct > 0 and recent_slope < -0.01:
         days = abs(gap_pct) / abs(recent_slope)
         if days <= 15:
-            forecast = f"약 {days:.0f}일 뒤 데드크로스 우려 (갭 {gap_pct:.1f}%, 발산 {recent_slope:.2f}%/일)"
+            forecast = f"약 {days:.0f}일 뒤 5·20 데드크로스 우려 (갭 {gap_pct:.1f}%, 발산 {recent_slope:.2f}%/일)"
 
-    # 최근 크로스 발생 여부(쌍바닥/되돌림 힌트)
+    # 20·60 크로스 근접도 (60일선 있을 때)
+    forecast60 = None
+    if m60 is not None:
+        gap2060 = (m20 - m60) / m60 * 100
+        g2060_series = ((ma20 - ma60) / ma60 * 100).dropna()
+        if len(g2060_series) >= 6:
+            slope2060 = (g2060_series.iloc[-1] - g2060_series.iloc[-6]) / 5
+            if gap2060 < 0 and slope2060 > 0.005:
+                d = abs(gap2060) / slope2060
+                if d <= 30:
+                    forecast60 = f"약 {d:.0f}일 뒤 20·60 골든크로스 (중기 추세전환 신호)"
+            elif gap2060 > 0 and slope2060 < -0.005:
+                d = abs(gap2060) / abs(slope2060)
+                if d <= 30:
+                    forecast60 = f"약 {d:.0f}일 뒤 20·60 데드크로스 우려"
+
+    # 최근 크로스 발생 여부
     diff = (ma5 - ma20).dropna()
     recent_cross = None
     if len(diff) >= 6:
         for i in range(len(diff) - 5, len(diff)):
             if i > 0 and np.sign(diff.iloc[i - 1]) != np.sign(diff.iloc[i]):
                 recent_cross = ("골든크로스" if diff.iloc[i] > 0 else "데드크로스",
-                                 len(diff) - i)  # (종류, N일 전)
+                                 len(diff) - i)
                 break
-
     note = None
     if recent_cross:
         kind, ago = recent_cross
@@ -183,56 +364,183 @@ def analyze_ma(daily: pd.DataFrame, lookback_days: int = 60) -> dict:
         elif kind == "데드크로스" and px > m5:
             note = f"{ago}일 전 데드크로스 후 5일선 회복 → 반등 시도"
 
-    return {"ok": True, "price": round(px), "ma5": round(m5), "ma20": round(m20),
+    # 5·20일선 방향 예측 (1~3일 후)
+    ma5_fc = _ma_slope_forecast(ma5, horizon=3)
+    ma20_fc = _ma_slope_forecast(ma20, horizon=3)
+
+    return {"ok": True, "price": round(px),
+            "ma5": round(m5), "ma20": round(m20),
+            "ma60": round(m60) if m60 is not None else None,
             "position": " / ".join(pos), "gap_pct": round(gap_pct, 2),
-            "state": cross_state, "forecast": forecast, "note": note}
+            "state": cross_state, "forecast": forecast, "forecast60": forecast60,
+            "note": note,
+            "ma5_forecast": ma5_fc, "ma20_forecast": ma20_fc}
 
 
 # ======================================================================
-# 5. 거래량 및 수급 (외인/기관/개인 5일·20일)
+# 4-B. 눌림목 매수 분석 (5/10/20일선 지지터치 + 손절가 + 기술적 의견)
 # ======================================================================
+def analyze_pullback(daily: pd.DataFrame, stoch_daily: dict = None,
+                      vol_over: bool = None, alignment: str = None,
+                      tol_pct: float = 0.8) -> dict:
+    """
+    눌림목 매수기법 판정.
+    - 5일선 눌림 : 종가가 5일선 위 + 당일 저가가 5일선을 tol% 이내로 터치 → 1차 매수
+    - 10일선 눌림: 종가가 10일선 위(5일선은 이탈했을 수 있음) + 저가 10일선 터치 → 2차 매수
+    - 20일선 눌림: 종가가 20일선 위 + 저가 20일선 터치 → 조정 후 매수(추세 유지)
+    각 신호에 손절가(해당 지지선 이탈가 -1~2%)와 신뢰도(정배열·거래량·스토캐 위치) 부여.
+    """
+    df = daily.tail(80)
+    close = df["close"]
+    low = df["low"]
+    ma5 = close.rolling(5).mean()
+    ma10 = close.rolling(10).mean()
+    ma20 = close.rolling(20).mean()
+
+    if len(df) < 20 or pd.isna(ma20.iloc[-1]):
+        return {"ok": False}
+
+    px = float(close.iloc[-1])
+    lo = float(low.iloc[-1])
+    m5 = float(ma5.iloc[-1])
+    m10 = float(ma10.iloc[-1]) if pd.notna(ma10.iloc[-1]) else None
+    m20 = float(ma20.iloc[-1])
+
+    signals = []
+
+    def touched(line):
+        # 당일 저가가 이평선을 tol% 이내로 눌렀는지 (위에서 터치)
+        return lo <= line * (1 + tol_pct / 100)
+
+    # --- 5일선 눌림 ---
+    if px >= m5 and touched(m5):
+        stop = round(m5 * 0.98)  # 5일선 -2% 이탈 시 손절
+        signals.append({
+            "line": "5일선", "level": round(m5), "stop": stop,
+            "type": "1차 눌림목(단기)",
+            "desc": f"종가 5일선({m5:,.0f}) 위 + 저가가 5일선 지지터치 → 단기 눌림목 매수 관점"
+        })
+
+    # --- 10일선 눌림 (5일선 이탈했으나 10일선 지지) ---
+    if m10 is not None and px >= m10 and touched(m10) and px < m5:
+        stop = round(m10 * 0.98)
+        signals.append({
+            "line": "10일선", "level": round(m10), "stop": stop,
+            "type": "2차 눌림목(5일선 이탈·10일선 지지)",
+            "desc": f"5일선({m5:,.0f}) 이탈했으나 10일선({m10:,.0f}) 지지 → 2차 매수 관점"
+        })
+
+    # --- 20일선 눌림 (중기 추세 지지) ---
+    if px >= m20 and touched(m20):
+        stop = round(m20 * 0.97)  # 20일선 -3% 이탈 시 손절
+        signals.append({
+            "line": "20일선", "level": round(m20), "stop": stop,
+            "type": "중기 눌림목(추세 유지)",
+            "desc": f"종가 20일선({m20:,.0f}) 위 + 저가 20일선 지지터치 → 중기 추세 눌림 매수"
+        })
+
+    # --- 신뢰도/기술적 의견 ---
+    confidence = "중"
+    opinion_bits = []
+    if alignment == "정배열":
+        confidence = "상"
+        opinion_bits.append("정배열 상태라 눌림목 신뢰도 높음")
+    elif alignment == "역배열":
+        confidence = "하"
+        opinion_bits.append("역배열이라 눌림목보다 추세 반등 확인 필요")
+
+    # 거래량: 눌림목은 거래량 감소(매물 소화)가 이상적
+    if vol_over is True:
+        opinion_bits.append("단, 당일 거래량이 5일선 위 → 눌림보다 이탈/변동성 주의")
+    elif vol_over is False:
+        opinion_bits.append("거래량 축소 동반(건전한 눌림 패턴)")
+
+    # 스토캐: 과매도권이면 반등 탄력
+    if stoch_daily:
+        ds = stoch_daily.get("단기", {})
+        if ds.get("ok"):
+            if ds.get("zone") == "과매도":
+                opinion_bits.append(f"일봉 단기 스토캐 과매도(K{ds.get('k')}) → 반등 탄력 기대")
+            elif ds.get("zone") == "과매수":
+                opinion_bits.append(f"일봉 단기 스토캐 과매수(K{ds.get('k')}) → 추가 눌림 여지")
+
+    if not signals:
+        # 눌림 신호 없을 때: 현재 위치 기반 코멘트
+        if px < m20:
+            status = f"20일선({m20:,.0f}) 하회 — 눌림목 아님, 지지 회복 확인 후 접근"
+        elif px < m5:
+            status = f"5일선({m5:,.0f}) 하회·20일선 위 — 5일선 회복 or 20일선 터치 대기"
+        else:
+            status = "이평선 위 안착 — 눌림(터치) 대기 구간"
+        return {"ok": True, "has_signal": False, "status": status,
+                "confidence": confidence,
+                "opinion": " / ".join(opinion_bits) if opinion_bits else "",
+                "price": round(px)}
+
+    return {"ok": True, "has_signal": True, "signals": signals,
+            "confidence": confidence,
+            "opinion": " / ".join(opinion_bits) if opinion_bits else "",
+            "price": round(px)}
 def analyze_supply_demand(code: str, demo: bool = False) -> dict:
-    """pykrx 투자자별 순매수. KRX 회원제 전환으로 실패 가능 → 방어적 폴백."""
+    """pykrx 투자자별 순매수(5일/20일/60일) + 각 주체 매매비중.
+    KRX 회원제 전환으로 실패 가능 → 방어적 폴백."""
     if demo:
         return {"ok": True, "demo": True,
-                "foreign_5d": 12000, "foreign_20d": -30000,
-                "inst_5d": 8000, "inst_20d": 15000,
-                "indiv_ratio": 42.0,
-                "summary": "외인 5일 매수·20일 매도(단기 수급주체) / 기관 5일·20일 매수(중기 주체) / 개인비중 42%"}
+                "foreign": {"d5": 12000, "d20": -30000, "d60": 45000},
+                "inst": {"d5": 8000, "d20": 15000, "d60": 22000},
+                "indiv": {"d5": -20000, "d20": 15000, "d60": -67000},
+                "ratio": {"foreign": 35.0, "inst": 23.0, "indiv": 42.0},
+                "main_5d": "외인", "main_20d": "기관",
+                "summary": ("외인 5일 매수·20일 매도·60일 매수 / 기관 5일·20일·60일 매수 / "
+                            "개인비중 42%(외35·기23) → 단기 외인 주도")}
     try:
         from pykrx import stock
         end = dt.date.today()
-        start20 = (end - dt.timedelta(days=32)).strftime("%Y%m%d")
-        start5 = (end - dt.timedelta(days=9)).strftime("%Y%m%d")
         e = end.strftime("%Y%m%d")
+        s5 = (end - dt.timedelta(days=9)).strftime("%Y%m%d")
+        s20 = (end - dt.timedelta(days=32)).strftime("%Y%m%d")
+        s60 = (end - dt.timedelta(days=90)).strftime("%Y%m%d")
 
         def net(df_):
-            # 컬럼: 기관합계/기타법인/개인/외국인합계 ... 순매수 거래대금
             cols = df_.columns
-            fo = df_["외국인합계"].sum() if "외국인합계" in cols else np.nan
+            fo = df_["외국인합계"].sum() if "외국인합계" in cols else (df_["외국인"].sum() if "외국인" in cols else np.nan)
             ins = df_["기관합계"].sum() if "기관합계" in cols else np.nan
             ind = df_["개인"].sum() if "개인" in cols else np.nan
-            return fo, ins, ind
+            return float(fo), float(ins), float(ind)
 
-        df20 = stock.get_market_trading_value_by_date(start20, e, code)
-        df5 = stock.get_market_trading_value_by_date(start5, e, code)
-        f20, i20, p20 = net(df20)
+        df5 = stock.get_market_trading_value_by_date(s5, e, code)
+        df20 = stock.get_market_trading_value_by_date(s20, e, code)
+        df60 = stock.get_market_trading_value_by_date(s60, e, code)
         f5, i5, p5 = net(df5)
+        f20, i20, p20 = net(df20)
+        f60, i60, p60 = net(df60)
+
+        # 20일 기준 매매비중 (절대값 기준 점유율)
         total20 = abs(f20) + abs(i20) + abs(p20)
-        indiv_ratio = (abs(p20) / total20 * 100) if total20 else np.nan
+        r_f = (abs(f20) / total20 * 100) if total20 else float("nan")
+        r_i = (abs(i20) / total20 * 100) if total20 else float("nan")
+        r_p = (abs(p20) / total20 * 100) if total20 else float("nan")
 
-        def trend(v5, v20):
-            s5 = "매수" if v5 > 0 else "매도"
-            s20 = "매수" if v20 > 0 else "매도"
-            return s5, s20
+        def side(v):
+            return "매수" if v > 0 else "매도"
 
-        f5s, f20s = trend(f5, f20)
-        i5s, i20s = trend(i5, i20)
-        summary = (f"외인 5일 {f5s}·20일 {f20s} / 기관 5일 {i5s}·20일 {i20s} / "
-                   f"개인비중 {indiv_ratio:.0f}%")
-        return {"ok": True, "foreign_5d": int(f5), "foreign_20d": int(f20),
-                "inst_5d": int(i5), "inst_20d": int(i20),
-                "indiv_ratio": round(float(indiv_ratio), 1), "summary": summary}
+        # 단기(5일)·중기(20일) 주도 수급주체 (순매수 절대값 최대)
+        main_5d = max([("외인", abs(f5)), ("기관", abs(i5)), ("개인", abs(p5))],
+                      key=lambda x: x[1])[0]
+        main_20d = max([("외인", abs(f20)), ("기관", abs(i20)), ("개인", abs(p20))],
+                       key=lambda x: x[1])[0]
+
+        summary = (f"외인 5일 {side(f5)}·20일 {side(f20)}·60일 {side(f60)} / "
+                   f"기관 5일 {side(i5)}·20일 {side(i20)}·60일 {side(i60)} / "
+                   f"개인비중 {r_p:.0f}%(외{r_f:.0f}·기{r_i:.0f}) → 단기 {main_5d} 주도")
+
+        return {"ok": True,
+                "foreign": {"d5": int(f5), "d20": int(f20), "d60": int(f60)},
+                "inst": {"d5": int(i5), "d20": int(i20), "d60": int(i60)},
+                "indiv": {"d5": int(p5), "d20": int(p20), "d60": int(p60)},
+                "ratio": {"foreign": round(r_f, 1), "inst": round(r_i, 1), "indiv": round(r_p, 1)},
+                "main_5d": main_5d, "main_20d": main_20d,
+                "summary": summary}
     except Exception as e:
         return {"ok": False, "error": str(e),
                 "summary": "수급 데이터 조회 실패(KRX 로그인/차단 확인 필요)"}
@@ -242,19 +550,24 @@ def analyze_supply_demand(code: str, demo: bool = False) -> dict:
 # 6. 공매도 현황
 # ======================================================================
 def analyze_shorting(code: str, demo: bool = False) -> dict:
+    """공매도 비중을 5일/20일/60일 구간으로 각각 추세 판정.
+    '추세'는 각 구간의 첫날 대비 마지막날(최근) 비중 변화로 정의."""
     if demo:
-        return {"ok": True, "demo": True, "short_5d_trend": "상승",
-                "short_ratio_now": 8.4, "short_ratio_5d_ago": 3.1,
-                "summary": "공매도 5일 상승 추세, 비중 3.1%→8.4% 급증"}
+        return {"ok": True, "demo": True,
+                "now": 7.5,
+                "d5": {"ago": 9.6, "trend": "하락"},
+                "d20": {"ago": 5.2, "trend": "상승"},
+                "d60": {"ago": 4.1, "trend": "상승"},
+                "avg20": 6.8,
+                "summary": "공매도 비중 현재 7.5% | 5일 하락(9.6→7.5) · 20일 상승(5.2→7.5) · 60일 상승(4.1→7.5)"}
     try:
         from pykrx import stock
         end = dt.date.today()
-        start = (end - dt.timedelta(days=12)).strftime("%Y%m%d")
         e = end.strftime("%Y%m%d")
-        df = stock.get_shorting_volume_by_date(start, e, code)
+        s60 = (end - dt.timedelta(days=90)).strftime("%Y%m%d")
+        df = stock.get_shorting_volume_by_date(s60, e, code)
         if df is None or len(df) < 2:
             return {"ok": False, "summary": "공매도 데이터 부족"}
-        # 비중 컬럼 탐색
         ratio_col = None
         for c in df.columns:
             if "비중" in c or "비율" in c:
@@ -262,13 +575,43 @@ def analyze_shorting(code: str, demo: bool = False) -> dict:
                 break
         if ratio_col is None:
             return {"ok": False, "summary": "공매도 비중 컬럼 없음"}
-        now = float(df[ratio_col].iloc[-1])
-        ago = float(df[ratio_col].iloc[0])
-        trend = "상승" if now > ago else ("하락" if now < ago else "보합")
-        spike = " 급증" if (now - ago) > 3 else ""
-        return {"ok": True, "short_5d_trend": trend,
-                "short_ratio_now": round(now, 1), "short_ratio_5d_ago": round(ago, 1),
-                "summary": f"공매도 5일 {trend} 추세, 비중 {ago:.1f}%→{now:.1f}%{spike}"}
+
+        ser = df[ratio_col].dropna()
+        if len(ser) < 2:
+            return {"ok": False, "summary": "공매도 비중 데이터 부족"}
+        now = float(ser.iloc[-1])
+
+        def window_trend(n):
+            """최근 n 거래일 구간의 첫날 대비 현재 비중 변화."""
+            if len(ser) <= 1:
+                return None
+            past = ser.iloc[-min(n, len(ser))]
+            ago = float(past)
+            if now > ago + 0.3:
+                t = "상승"
+            elif now < ago - 0.3:
+                t = "하락"
+            else:
+                t = "보합"
+            spike = " 급증" if (now - ago) > 3 else ""
+            return {"ago": round(ago, 1), "trend": t + spike}
+
+        d5 = window_trend(5)
+        d20 = window_trend(20)
+        d60 = window_trend(60)
+        avg20 = float(ser.iloc[-min(20, len(ser)):].mean())
+
+        def fmt(label, w):
+            if not w:
+                return f"{label} N/A"
+            return f"{label} {w['trend']}({w['ago']}→{now:.1f})"
+
+        summary = (f"공매도 비중 현재 {now:.1f}% | "
+                   f"{fmt('5일', d5)} · {fmt('20일', d20)} · {fmt('60일', d60)}")
+
+        return {"ok": True, "now": round(now, 1),
+                "d5": d5, "d20": d20, "d60": d60,
+                "avg20": round(avg20, 1), "summary": summary}
     except Exception as e:
         return {"ok": False, "error": str(e),
                 "summary": "공매도 데이터 조회 실패(KRX 로그인/차단 확인 필요)"}
@@ -311,47 +654,101 @@ def analyze_divergence_detail(daily: pd.DataFrame, monthly: pd.DataFrame,
 # 7 + 8. 인사이트 + 일봉 종합의견
 # ======================================================================
 def build_daily_verdict(stoch: dict, ma: dict, supply: dict, short: dict,
-                         div: dict) -> dict:
+                         div: dict, pullback: dict = None, bear: dict = None) -> dict:
     score = 0
     reasons = []
+    breakdown = []   # [{"item","pts","note"}] — 실제 채점 내역
 
-    # 스토캐 방향 (일봉 단/중기)
-    ds = stoch["daily"].get("단기", {})
-    dm = stoch["daily"].get("중기", {})
-    if ds.get("ok") and ds["direction"] == "상승":
-        score += 1; reasons.append("일봉 단기 스토캐 상승")
-    if ds.get("ok") and ds["direction"] == "하락":
-        score -= 1; reasons.append("일봉 단기 스토캐 하락")
+    def add(item, pts, note):
+        nonlocal score
+        score += pts
+        breakdown.append({"item": item, "pts": pts, "note": note})
+        if pts != 0:
+            reasons.append(note)
 
-    # 다이버전스
+    # 다이버전스 (±2)
     dd = div.get("일봉", {})
     if dd.get("found"):
         if dd["type"] == "상승":
-            score += 2; reasons.append("일봉 상승다이버전스")
+            add("일봉 다이버전스", +2, f"상승다이버전스[{dd.get('to_date','')}]")
         else:
-            score -= 2; reasons.append("일봉 하락다이버전스")
+            add("일봉 다이버전스", -2, f"하락다이버전스[{dd.get('to_date','')}]")
+    else:
+        add("일봉 다이버전스", 0, "다이버전스 없음")
 
-    # 이평
+    # 일봉 단기 스토캐 (±1)
+    ds = stoch["daily"].get("단기", {})
+    if ds.get("ok") and ds["direction"] == "상승":
+        add("일봉 단기 스토캐", +1, f"단기 스토캐 상승(K{ds.get('k','')})")
+    elif ds.get("ok") and ds["direction"] == "하락":
+        add("일봉 단기 스토캐", -1, f"단기 스토캐 하락(K{ds.get('k','')})")
+    else:
+        add("일봉 단기 스토캐", 0, "단기 스토캐 보합")
+
+    # 이평 배열 (±1)
     if ma.get("ok"):
         if "정배열" in ma["state"]:
-            score += 1; reasons.append("5>20 정배열")
+            add("이평 배열", +1, f"{ma['state']}")
+        elif "역배열" in ma["state"]:
+            add("이평 배열", -1, f"{ma['state']}")
         else:
-            score -= 1; reasons.append("5<20 역배열")
+            add("이평 배열", 0, f"{ma['state']}")
+        # 골든크로스 임박 (+1)
         if ma.get("forecast") and "골든크로스" in ma["forecast"]:
-            score += 1; reasons.append("골든크로스 임박")
+            add("5·20 골든크로스 임박", +1, ma["forecast"])
+        elif ma.get("forecast") and "데드크로스" in ma["forecast"]:
+            add("5·20 데드크로스 우려", 0, ma["forecast"])  # 감점은 배열에서 이미 반영
 
-    # 수급
+    # 수급 (외인/기관 각 +1)
     if supply.get("ok"):
-        if supply.get("foreign_5d", 0) > 0:
-            score += 1; reasons.append("외인 5일 순매수")
-        if supply.get("inst_5d", 0) > 0:
-            score += 1; reasons.append("기관 5일 순매수")
+        f5 = supply.get("foreign", {}).get("d5", 0)
+        i5 = supply.get("inst", {}).get("d5", 0)
+        if f5 > 0:
+            add("외인 5일 수급", +1, "외인 5일 순매수")
+        else:
+            add("외인 5일 수급", 0, "외인 5일 순매도")
+        if i5 > 0:
+            add("기관 5일 수급", +1, "기관 5일 순매수")
+        else:
+            add("기관 5일 수급", 0, "기관 5일 순매도")
 
-    # 공매도
-    if short.get("ok") and short.get("short_5d_trend") == "상승":
-        score -= 1; reasons.append("공매도 비중 상승")
+    # 공매도 5일 추세 (±1)
+    if short.get("ok"):
+        d5t = short.get("d5", {}).get("trend", "")
+        if "상승" in d5t:
+            add("공매도 5일 추세", -1, f"공매도 5일 상승({d5t})")
+        elif "하락" in d5t:
+            add("공매도 5일 추세", +1, f"공매도 5일 하락({d5t})")
+        else:
+            add("공매도 5일 추세", 0, "공매도 5일 보합")
 
-    if score >= 3:
+    # 눌림목 매수 신호 (+1) — 정배열 상태의 지지선 터치는 매수 기회
+    if pullback and pullback.get("ok") and pullback.get("has_signal"):
+        sigs = pullback.get("signals", [])
+        best = sigs[0] if sigs else None
+        if best:
+            add("눌림목 매수신호", +1, f"{best['line']} 지지터치({best['type']})")
+    elif pullback and pullback.get("ok"):
+        add("눌림목 매수신호", 0, "눌림 신호 없음(터치 대기)")
+
+    # 하락 경고 추가 감점 (쌍봉/데드캣바운스 — 다이버전스는 위에서 이미 반영)
+    has_strong_bear = False
+    if bear and bear.get("has_warning"):
+        for w in bear["warnings"]:
+            if w["kind"] == "쌍봉(더블탑)":
+                pts = -2 if w["level"] == "높음" else -1
+                add("쌍봉(더블탑)", pts, w["desc"][:40])
+                if w["level"] == "높음":
+                    has_strong_bear = True
+            elif w["kind"] == "데드캣바운스":
+                add("데드캣바운스", -1, w["desc"][:40])
+            # 하락다이버전스는 '일봉 다이버전스'에서 이미 -2 반영됨(중복 방지)
+            if w["kind"] == "하락다이버전스" and w["level"] == "높음":
+                has_strong_bear = True
+
+    if score >= 4:
+        verdict = "적극 매수 관점"
+    elif score >= 2:
         verdict = "원만한 상승 예상"
     elif score >= 1:
         verdict = "완만한 상승/반등 시도"
@@ -362,38 +759,99 @@ def build_daily_verdict(stoch: dict, ma: dict, supply: dict, short: dict,
     else:
         verdict = "하락 주의(관망)"
 
-    return {"score": score, "verdict": verdict, "reasons": reasons}
+    # 강한 하락신호(넥라인 이탈 쌍봉 or 하락다이버전스)면 판정을 강제 하향
+    if has_strong_bear and score > -2:
+        verdict = "⚠️ 하락신호 우세 — 매도/관망"
+
+    return {"score": score, "verdict": verdict, "reasons": reasons,
+            "breakdown": breakdown, "strong_bear": has_strong_bear}
 
 
 # ======================================================================
-# 9. 월봉 종합 (동일 양식, 12개월 기준)
+# 9. 월봉 종합 (확보 가능한 데이터 범위 내에서 최대한 판단)
 # ======================================================================
-def build_monthly_verdict(stoch: dict, div: dict) -> dict:
+def build_monthly_verdict(stoch: dict, div: dict, monthly: pd.DataFrame) -> dict:
     reasons = []
     score = 0
-    ms = stoch["monthly"].get("단기", {})
-    if ms.get("ok"):
-        if ms["direction"] == "상승":
-            score += 1; reasons.append("월봉 단기 스토캐 상승")
-        elif ms["direction"] == "하락":
-            score -= 1; reasons.append("월봉 단기 스토캐 하락")
+    breakdown = []
+    n_months = len(monthly) if monthly is not None else 0
+
+    def add(item, pts, note):
+        nonlocal score
+        score += pts
+        breakdown.append({"item": item, "pts": pts, "note": note})
+        if pts != 0:
+            reasons.append(note)
+
+    # 월봉 다이버전스 (±2) — 최우선
     md = div.get("월봉", {})
     if md.get("found"):
         if md["type"] == "상승":
-            score += 2; reasons.append("월봉 상승다이버전스")
+            add("월봉 다이버전스", +2, f"상승다이버전스[{md.get('to_date','')}]")
         else:
-            score -= 2; reasons.append("월봉 하락다이버전스")
+            add("월봉 다이버전스", -2, f"하락다이버전스[{md.get('to_date','')}]")
+    else:
+        add("월봉 다이버전스", 0, "다이버전스 없음")
 
-    if score >= 2:
+    # 월봉 스토캐 장/중/단 (확보된 프레임만, 각 ±1)
+    ms = stoch.get("monthly", {})
+    for key, label in [("장기", "월봉 장기 스토캐"), ("중기", "월봉 중기 스토캐"),
+                        ("단기", "월봉 단기 스토캐")]:
+        node = ms.get(key, {})
+        if not node.get("ok"):
+            add(label, 0, f"{key} 데이터 부족")
+            continue
+        d = node["direction"]
+        zone = node.get("zone", "")
+        k = node.get("k", "")
+        # 과매도권에서 상승전환은 강한 호재(가중 +1 유지, 문구 강조)
+        if d == "상승" and zone == "과매도":
+            add(label, +1, f"{key} 과매도권 상승전환(K{k})")
+        elif d == "상승":
+            add(label, +1, f"{key} 상승(K{k})")
+        elif d == "하락" and zone == "과매수":
+            add(label, -1, f"{key} 과매수권 하락전환(K{k})")
+        elif d == "하락":
+            add(label, -1, f"{key} 하락(K{k})")
+        else:
+            add(label, 0, f"{key} 보합(K{k})")
+
+    # 월봉 MA 배열 (60개월 확보 시에만, ±1)
+    if monthly is not None and n_months >= 20:
+        close = monthly["close"]
+        m5 = close.rolling(5).mean().iloc[-1]
+        m20 = close.rolling(20).mean().iloc[-1] if n_months >= 20 else None
+        if pd.notna(m5) and m20 is not None and pd.notna(m20):
+            if m5 > m20:
+                add("월봉 MA 배열", +1, "월 5>20 (중장기 정배열)")
+            else:
+                add("월봉 MA 배열", -1, "월 5<20 (중장기 역배열)")
+
+    # 판정 (확보 데이터가 적으면 판정 신뢰도 낮음을 문구로)
+    if score >= 3:
         verdict = "월봉 상승 국면"
     elif score >= 1:
         verdict = "월봉 반등 초입 가능"
     elif score == 0:
         verdict = "월봉 보합/방향 미확정"
+    elif score >= -2:
+        verdict = "월봉 약세 조정"
     else:
         verdict = "월봉 약세 지속"
+
+    # 데이터 범위 안내
+    if n_months >= 55:
+        cover = f"확보 {n_months}개월(약 5년) — 장기 지표 포함 판단"
+    elif n_months >= 24:
+        cover = f"확보 {n_months}개월(약 {n_months//12}년) — 중기까지 판단"
+    elif n_months >= 6:
+        cover = f"확보 {n_months}개월 — 단기 위주 제한적 판단(상장 이력 짧음)"
+    else:
+        cover = f"확보 {n_months}개월 — 데이터 부족, 참고용"
+
     return {"score": score, "verdict": verdict, "reasons": reasons,
-            "note": "월봉은 12개월 데이터 기준 분석(장기 지표 제약)"}
+            "breakdown": breakdown, "n_months": n_months,
+            "note": f"월봉 판단 근거: {cover}"}
 
 
 # ======================================================================
@@ -402,18 +860,47 @@ def build_monthly_verdict(stoch: dict, div: dict) -> dict:
 def analyze_stock(name: str, code: str, daily: pd.DataFrame,
                    monthly: pd.DataFrame, hourly: pd.DataFrame,
                    demo: bool = False) -> dict:
-    # 일봉은 60일치로만 분석(요청 9번), 월봉은 12개월치로 제한
+    # 일봉은 60일치로 분석(스토캐 워밍업 여유 포함), 월봉은 5년(60개월)까지 사용
     daily60 = daily.tail(80) if len(daily) > 80 else daily          # 지표 워밍업 여유 포함
-    monthly12 = monthly.tail(14) if len(monthly) > 14 else monthly  # 12개월 + 여유
+    # 월봉: 5년 소스 반영 → 다이버전스/스토캐는 전체(최대 60개월) 사용
+    monthly_full = monthly.tail(62) if len(monthly) > 62 else monthly
 
-    stoch = analyze_stoch_frames(hourly, daily60, monthly12)
+    stoch = analyze_stoch_frames(hourly, daily60, monthly_full)
     ma = analyze_ma(daily, lookback_days=60)
     supply = analyze_supply_demand(code, demo=demo)
     short = analyze_shorting(code, demo=demo)
-    div = analyze_divergence_detail(daily60, monthly12, hourly)
+    div = analyze_divergence_detail(daily60, monthly_full, hourly)
 
-    daily_verdict = build_daily_verdict(stoch, ma, supply, short, div)
-    monthly_verdict = build_monthly_verdict(stoch, div)
+    # 하락 경고 (일봉 하락다이버전스/쌍봉/데드캣바운스) — 최우선 강조
+    bear = build_bear_warnings(daily60, div, stoch.get("daily"))
+
+    # 거래량 5일선 돌파 여부 (눌림 판정 보조)
+    vol_over = None
+    try:
+        vser = daily["volume"]
+        vma5 = vser.rolling(5).mean()
+        vol_over = bool(vser.iloc[-1] > vma5.iloc[-1])
+    except Exception:
+        vol_over = None
+
+    # 눌림목 매수 분석
+    pullback = analyze_pullback(
+        daily, stoch_daily=stoch.get("daily"),
+        vol_over=vol_over,
+        alignment=("정배열" if ma.get("ok") and "정배열" in ma.get("state", "")
+                   else ("역배열" if ma.get("ok") and "역배열" in ma.get("state", "") else None)),
+    )
+
+    daily_verdict = build_daily_verdict(stoch, ma, supply, short, div, pullback, bear)
+    monthly_verdict = build_monthly_verdict(stoch, div, monthly_full)
+
+    # 3프레임 차트 (matplotlib PNG base64)
+    charts = {}
+    try:
+        from chart_maker import make_three_frame_charts
+        charts = make_three_frame_charts(hourly, daily60, monthly_full)
+    except Exception as e:
+        charts = {"error": str(e)}
 
     last_close = float(daily["close"].iloc[-1])
     prev_close = float(daily["close"].iloc[-2])
@@ -423,11 +910,14 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
         "name": name, "code": code,
         "price": round(last_close), "change_pct": round(chg, 2),
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "bear_warnings": bear,      # 2-B 하락 경고 (최우선)
         "divergence": div,          # 2번
         "stoch_frames": stoch,      # 3번
         "ma": ma,                   # 4번
+        "pullback": pullback,       # 4-B 눌림목 매수
         "supply_demand": supply,    # 5번
         "shorting": short,          # 6번
         "daily_verdict": daily_verdict,     # 7,8번
         "monthly_verdict": monthly_verdict, # 9번
+        "charts": charts,           # 차트 (JSON엔 base64가 커서 제외됨, HTML에만 사용)
     }

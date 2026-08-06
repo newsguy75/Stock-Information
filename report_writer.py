@@ -93,6 +93,35 @@ def build_html(analysis: dict) -> str:
     chg_col = C_UP if chg >= 0 else C_DOWN
     esc = html_lib.escape
 
+    # 2-B. 하락 경고 배너 (최상단, 최우선 강조)
+    bear = a.get("bear_warnings", {})
+    bear_html = ""
+    if bear.get("has_warning"):
+        w_rows = []
+        for w in bear["warnings"]:
+            lv = w["level"]
+            badge_col = "#c0182b" if lv == "높음" else "#c77a0a"
+            w_rows.append(
+                f'<div class="bear-row">'
+                f'<span class="bear-badge" style="background:{badge_col}">{esc(w["kind"])}</span>'
+                f'<span class="bear-desc">{esc(w["desc"])}</span></div>')
+        bear_html = (
+            '<div class="bear-banner">'
+            '<div class="bear-title">🚨 하락 경고 신호 (일봉 기준)</div>'
+            + "".join(w_rows) + '</div>')
+
+    # 0. 3프레임 차트 (1H / 일 / 월)
+    charts = a.get("charts", {})
+    chart_imgs = []
+    for key, label in [("hourly", "1시간봉"), ("daily", "일봉"), ("monthly", "월봉")]:
+        uri = charts.get(key)
+        if uri:
+            chart_imgs.append(f'<div class="chart"><img src="{uri}" alt="{label}"></div>')
+        else:
+            chart_imgs.append(f'<div class="chart na-chart">{label}<br><span class="sub">데이터 없음</span></div>')
+    chart_html = _section("1. 차트 (1H · 일 · 월 / 캔들+MA5·20+거래량+스토캐)",
+                          f'<div class="charts">{"".join(chart_imgs)}</div>')
+
     # 2. 다이버전스
     div_rows = []
     for frame in ["일봉", "월봉", "1H"]:
@@ -126,74 +155,183 @@ def build_html(analysis: dict) -> str:
         + _sd("장기", s["daily"].get("장기", {})) + _sd("중기", s["daily"].get("중기", {})) + _sd("단기", s["daily"].get("단기", {}))
         + '</div></div>'
         f'<div class="frame"><div class="frame-n">월봉</div><div class="chips">'
-        + _sd("중기", s["monthly"].get("중기", {})) + _sd("단기", s["monthly"].get("단기", {}))
+        + _sd("장기", s["monthly"].get("장기", {})) + _sd("중기", s["monthly"].get("중기", {})) + _sd("단기", s["monthly"].get("단기", {}))
         + '</div></div>'
     )
     verdict_lines = "".join(f'<li>{esc(l)}</li>' for l in s["verdict"].get("lines", []))
     stoch_body += f'<ul class="verdict-list">{verdict_lines}</ul>'
     stoch_html = _section("3. 스토캐스틱 프레임별 방향성 (1H 장·중·단 / 일 / 월)", stoch_body)
 
-    # 4. 이평선
+    # 4. 이평선 (5/20/60 + 방향예측)
     ma = a["ma"]
     if ma.get("ok"):
+        ma60_txt = f' / 60일 {ma["ma60"]:,}' if ma.get("ma60") else ' / 60일 미형성'
         ma_inner = (
             f'<div class="row"><span class="k">현재가/이평</span><span class="v">'
-            f'{ma["price"]:,}원 · {ma["position"]} <span class="sub">(5일 {ma["ma5"]:,} / 20일 {ma["ma20"]:,})</span></span></div>'
-            f'<div class="row"><span class="k">배열</span><span class="v" style="color:{_dir_color(ma["state"])}">{ma["state"]} <span class="sub">(갭 {ma["gap_pct"]:+.2f}%)</span></span></div>'
+            f'{ma["price"]:,}원 · {ma["position"]} '
+            f'<span class="sub">(5일 {ma["ma5"]:,} / 20일 {ma["ma20"]:,}{ma60_txt})</span></span></div>'
+            f'<div class="row"><span class="k">배열</span><span class="v" style="color:{_dir_color(ma["state"])}">{ma["state"]} <span class="sub">(5·20갭 {ma["gap_pct"]:+.2f}%)</span></span></div>'
         )
+        # 5·20일선 방향 예측 (1~3일)
+        def fc_line(label, fc):
+            if not fc or not fc.get("ok"):
+                return ""
+            col = _dir_color(fc["direction"])
+            proj = fc.get("proj", {})
+            proj_txt = " · ".join(f'{k} {v:,}' for k, v in proj.items())
+            return (f'<div class="row"><span class="k">{label} 예측</span>'
+                    f'<span class="v"><span style="color:{col}">{fc["direction"]}</span> '
+                    f'<span class="sub">({fc["slope_pct"]:+.2f}%/일) → {proj_txt}</span></span></div>')
+        ma_inner += fc_line("5일선", ma.get("ma5_forecast"))
+        ma_inner += fc_line("20일선", ma.get("ma20_forecast"))
         if ma.get("forecast"):
-            ma_inner += f'<div class="row"><span class="k">예측</span><span class="v" style="color:{_dir_color(ma["forecast"])}">{esc(ma["forecast"])}</span></div>'
+            ma_inner += f'<div class="row"><span class="k">크로스</span><span class="v" style="color:{_dir_color(ma["forecast"])}">{esc(ma["forecast"])}</span></div>'
+        if ma.get("forecast60"):
+            ma_inner += f'<div class="row"><span class="k">중기크로스</span><span class="v" style="color:{_dir_color(ma["forecast60"])}">{esc(ma["forecast60"])}</span></div>'
         if ma.get("note"):
             ma_inner += f'<div class="row"><span class="k">비고</span><span class="v sub">{esc(ma["note"])}</span></div>'
     else:
         ma_inner = '<div class="row"><span class="v na">이평 데이터 부족</span></div>'
-    ma_html = _section("4. 이평선 분석 (골든/데드크로스 근접·예측)", ma_inner)
+    ma_html = _section("4. 이평선 분석 (5·20·60일선 + 방향예측)", ma_inner)
 
-    # 5. 수급
+    # 4-B. 눌림목 매수
+    pb = a.get("pullback", {})
+    if pb.get("ok") and pb.get("has_signal"):
+        pb_rows = []
+        for s in pb["signals"]:
+            pb_rows.append(
+                f'<div class="row"><span class="k" style="color:{C_UP}">{s["line"]} 눌림</span>'
+                f'<span class="v"><b style="color:{C_UP}">{s["type"]}</b><br>'
+                f'<span class="sub">{esc(s["desc"])}</span><br>'
+                f'<span class="sub">진입 참고 {s["level"]:,} · '
+                f'<span style="color:{C_DOWN}">손절 {s["stop"]:,}</span></span></span></div>')
+        conf_col = C_UP if pb["confidence"] == "상" else (C_DOWN if pb["confidence"] == "하" else C_SUB)
+        pb_inner = "".join(pb_rows)
+        pb_inner += (f'<div class="row"><span class="k">신뢰도</span>'
+                     f'<span class="v" style="color:{conf_col}">{pb["confidence"]}</span></div>')
+        if pb.get("opinion"):
+            pb_inner += f'<div class="row"><span class="k">기술적 의견</span><span class="v sub">{esc(pb["opinion"])}</span></div>'
+    elif pb.get("ok"):
+        pb_inner = (f'<div class="row"><span class="k">현재</span>'
+                    f'<span class="v sub">{esc(pb.get("status",""))}</span></div>')
+        if pb.get("opinion"):
+            pb_inner += f'<div class="row"><span class="k">기술적 의견</span><span class="v sub">{esc(pb["opinion"])}</span></div>'
+    else:
+        pb_inner = '<div class="row"><span class="v na">눌림목 데이터 부족</span></div>'
+    pb_html = _section("4-B. 눌림목 매수 (5·10·20일선 지지터치 + 손절가)", pb_inner)
+
+    # 5. 수급 (5·20·60일 + 비중)
     sup = a["supply_demand"]
     if sup.get("ok"):
-        f5c = C_UP if sup.get("foreign_5d", 0) >= 0 else C_DOWN
-        i5c = C_UP if sup.get("inst_5d", 0) >= 0 else C_DOWN
+        def money(v):
+            col = C_UP if v >= 0 else C_DOWN
+            # 억원 단위 축약
+            eok = v / 1e8
+            if abs(eok) >= 1:
+                txt = f'{eok:+,.0f}억'
+            else:
+                txt = f'{v:+,.0f}'
+            return f'<b style="color:{col}">{txt}</b>'
+        fo, ins, ind = sup["foreign"], sup["inst"], sup["indiv"]
+        rt = sup.get("ratio", {})
         sup_inner = (
             f'<div class="row"><span class="k">요약</span><span class="v">{esc(sup["summary"])}</span></div>'
-            f'<div class="row"><span class="k">외인</span><span class="v">5일 <b style="color:{f5c}">{sup.get("foreign_5d",0):+,}</b> / 20일 {sup.get("foreign_20d",0):+,}</span></div>'
-            f'<div class="row"><span class="k">기관</span><span class="v">5일 <b style="color:{i5c}">{sup.get("inst_5d",0):+,}</b> / 20일 {sup.get("inst_20d",0):+,}</span></div>'
+            f'<div class="row"><span class="k">외인</span><span class="v">5일 {money(fo["d5"])} / 20일 {money(fo["d20"])} / 60일 {money(fo["d60"])} <span class="sub">(비중 {rt.get("foreign","?")}%)</span></span></div>'
+            f'<div class="row"><span class="k">기관</span><span class="v">5일 {money(ins["d5"])} / 20일 {money(ins["d20"])} / 60일 {money(ins["d60"])} <span class="sub">(비중 {rt.get("inst","?")}%)</span></span></div>'
+            f'<div class="row"><span class="k">개인</span><span class="v">5일 {money(ind["d5"])} / 20일 {money(ind["d20"])} / 60일 {money(ind["d60"])} <span class="sub">(비중 {rt.get("indiv","?")}%)</span></span></div>'
+            f'<div class="row"><span class="k">수급주도</span><span class="v">단기(5일) <b>{sup.get("main_5d","?")}</b> / 중기(20일) <b>{sup.get("main_20d","?")}</b></span></div>'
         )
     else:
         sup_inner = f'<div class="row"><span class="v na">{esc(sup.get("summary","수급 데이터 없음"))}</span></div>'
-    sup_html = _section("5. 거래량·수급 (외인·기관·개인)", sup_inner)
+    sup_html = _section("5. 거래량·수급 (외인·기관·개인 5·20·60일 + 비중)", sup_inner)
 
-    # 6. 공매도
+    # 6. 공매도 (5·20·60일 구간별)
     sh = a["shorting"]
     if sh.get("ok"):
+        now_v = sh.get("now")
+        def sh_line(label, w):
+            if not w:
+                return f'<div class="row"><span class="k">{label}</span><span class="v na">N/A</span></div>'
+            col = _dir_color(w["trend"])
+            return (f'<div class="row"><span class="k">{label}</span>'
+                    f'<span class="v"><span style="color:{col}">{w["trend"]}</span> '
+                    f'<span class="sub">({w["ago"]}% → {now_v}%)</span></span></div>')
         sh_inner = (
-            f'<div class="row"><span class="k">추세</span><span class="v" style="color:{_dir_color(sh.get("short_5d_trend"))}">{sh.get("short_5d_trend")}</span></div>'
-            f'<div class="row"><span class="k">비중</span><span class="v">{sh.get("short_ratio_5d_ago")}% → {sh.get("short_ratio_now")}%</span></div>'
+            f'<div class="row"><span class="k">현재 비중</span><span class="v"><b>{now_v}%</b> <span class="sub">(20일평균 {sh.get("avg20","?")}%)</span></span></div>'
+            + sh_line("5일 추세", sh.get("d5"))
+            + sh_line("20일 추세", sh.get("d20"))
+            + sh_line("60일 추세", sh.get("d60"))
+            + '<div class="row"><span class="k">기준</span><span class="v sub">각 구간 첫날 대비 현재 비중 변화(±0.3%p 이내 보합)</span></div>'
         )
     else:
         sh_inner = f'<div class="row"><span class="v na">{esc(sh.get("summary","공매도 데이터 없음"))}</span></div>'
-    sh_html = _section("6. 공매도 현황", sh_inner)
+    sh_html = _section("6. 공매도 현황 (5·20·60일 구간별)", sh_inner)
 
-    # 7,8. 일봉 종합
+    # 7,8. 일봉 종합 + 실제 채점표 (이 종목이 각 항목에서 받은 점수)
     dv = a["daily_verdict"]
     dvcol = _dir_color(dv["verdict"])
-    reasons = " · ".join(dv["reasons"]) if dv["reasons"] else "근거 부족"
+    breakdown = dv.get("breakdown", [])
+    rows_html = []
+    for b in breakdown:
+        pts = b["pts"]
+        if pts > 0:
+            pcol, ptxt = C_UP, f"+{pts}"
+        elif pts < 0:
+            pcol, ptxt = C_DOWN, f"{pts}"
+        else:
+            pcol, ptxt = C_SUB, "0"
+        rows_html.append(
+            f'<tr><td>{esc(b["item"])}</td>'
+            f'<td style="color:{pcol};font-weight:700;text-align:center">{ptxt}</td>'
+            f'<td class="sub">{esc(b["note"])}</td></tr>')
+    total_col = C_UP if dv["score"] > 0 else (C_DOWN if dv["score"] < 0 else C_SUB)
+    score_table = (
+        '<table class="score-tbl"><thead><tr><th>항목</th><th>점수</th><th>사유</th></tr></thead><tbody>'
+        + "".join(rows_html)
+        + f'<tr class="total-row"><td><b>합계</b></td>'
+          f'<td style="color:{total_col};font-weight:700;text-align:center">{dv["score"]:+d}</td>'
+          f'<td class="sub">→ {esc(dv["verdict"])}</td></tr>'
+        + '</tbody></table>'
+        '<div class="sub" style="margin-top:6px">판정 구간: +4↑ 적극매수 · +2~3 매수우위 · +1 매수관심 · 0 관망 · −1~−2 주의 · −3↓ 매도관심</div>'
+    )
     daily_html = _section(
         "7·8. 일봉 종합 의견",
         f'<div class="verdict-big" style="color:{dvcol}">{dv["verdict"]} '
         f'<span class="sub">(score {dv["score"]:+d})</span></div>'
-        f'<div class="sub">{esc(reasons)}</div>')
+        + score_table)
 
-    # 9. 월봉 종합
+    # 9. 월봉 종합 (채점표)
     mv = a["monthly_verdict"]
     mvcol = _dir_color(mv["verdict"])
-    mreasons = " · ".join(mv["reasons"]) if mv["reasons"] else "근거 부족"
+    m_breakdown = mv.get("breakdown", [])
+    m_rows = []
+    for b in m_breakdown:
+        pts = b["pts"]
+        if pts > 0:
+            pcol, ptxt = C_UP, f"+{pts}"
+        elif pts < 0:
+            pcol, ptxt = C_DOWN, f"{pts}"
+        else:
+            pcol, ptxt = C_SUB, "0"
+        m_rows.append(
+            f'<tr><td>{esc(b["item"])}</td>'
+            f'<td style="color:{pcol};font-weight:700;text-align:center">{ptxt}</td>'
+            f'<td class="sub">{esc(b["note"])}</td></tr>')
+    m_total_col = C_UP if mv["score"] > 0 else (C_DOWN if mv["score"] < 0 else C_SUB)
+    m_table = (
+        '<table class="score-tbl"><thead><tr><th>항목</th><th>점수</th><th>사유</th></tr></thead><tbody>'
+        + "".join(m_rows)
+        + f'<tr class="total-row"><td><b>합계</b></td>'
+          f'<td style="color:{m_total_col};font-weight:700;text-align:center">{mv["score"]:+d}</td>'
+          f'<td class="sub">→ {esc(mv["verdict"])}</td></tr>'
+        + '</tbody></table>'
+    )
     monthly_html = _section(
-        "9. 월봉 종합 의견 (12개월 기준)",
+        "9. 월봉 종합 의견",
         f'<div class="verdict-big" style="color:{mvcol}">{mv["verdict"]} '
         f'<span class="sub">(score {mv["score"]:+d})</span></div>'
-        f'<div class="sub">{esc(mreasons)}</div>'
-        f'<div class="sub" style="margin-top:4px">{esc(mv["note"])}</div>')
+        + m_table
+        + f'<div class="sub" style="margin-top:6px">{esc(mv["note"])}</div>')
 
     return f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8">
@@ -225,14 +363,31 @@ def build_html(analysis: dict) -> str:
   .verdict-list li {{ margin:2px 0; font-size:13px; }}
   .verdict-big {{ font-size:17px; font-weight:700; margin-bottom:4px; }}
   .foot {{ color:{C_SUB}; font-size:11px; text-align:center; margin-top:16px; }}
+  .charts {{ display:flex; gap:8px; flex-wrap:wrap; }}
+  .chart {{ flex:1; min-width:210px; }}
+  .chart img {{ width:100%; border-radius:6px; display:block; }}
+  .na-chart {{ flex:1; min-width:210px; text-align:center; padding:40px 0;
+    color:#5a5f6a; border:1px dashed {C_LINE}; border-radius:6px; }}
+  .score-tbl {{ width:100%; border-collapse:collapse; font-size:12px; margin-top:4px; }}
+  .score-tbl th {{ color:{C_SUB}; text-align:left; padding:4px 6px; border-bottom:1px solid {C_LINE}; font-weight:600; }}
+  .score-tbl td {{ padding:4px 6px; border-bottom:1px solid {C_LINE}; }}
+  .score-tbl th:nth-child(2), .score-tbl td:nth-child(2) {{ width:48px; text-align:center; }}
+  .score-tbl .total-row td {{ border-top:2px solid {C_LINE}; border-bottom:none; padding-top:6px; }}
+  .bear-banner {{ background:#2a0d12; border:1.5px solid #c0182b; border-radius:10px;
+    padding:12px 14px; margin-bottom:12px; }}
+  .bear-title {{ font-size:15px; font-weight:800; color:#ff5a6a; margin-bottom:8px; }}
+  .bear-row {{ display:flex; gap:8px; align-items:baseline; padding:4px 0; }}
+  .bear-badge {{ color:#fff; font-size:11px; font-weight:700; padding:2px 8px;
+    border-radius:5px; flex-shrink:0; }}
+  .bear-desc {{ font-size:13px; color:#f0d0d4; }}
 </style></head>
 <body><div class="wrap">
   <div class="head">
     <h1>{esc(a["name"])}</h1><span class="code">{a["code"]}</span>
     <span class="price" style="color:{chg_col}">{a["price"]:,}원 ({chg:+.2f}%)</span>
   </div>
-  {div_html}{stoch_html}{ma_html}{sup_html}{sh_html}{daily_html}{monthly_html}
-  <div class="foot">생성: {esc(a["timestamp"])} · 일봉 60일 / 월봉 12개월 기준</div>
+  {bear_html}{chart_html}{div_html}{stoch_html}{ma_html}{pb_html}{sup_html}{sh_html}{daily_html}{monthly_html}
+  <div class="foot">생성: {esc(a["timestamp"])} · 일봉 60일 / 월봉 최대 5년(60개월)</div>
 </div></body></html>"""
 
 
@@ -243,8 +398,10 @@ def save_report(analysis: dict, now: dt.datetime | None = None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=7)  # VN 기준 폴더명
     day_dir, jpath, hpath, stem = _paths(analysis["name"], analysis["code"], now)
 
+    # JSON엔 charts(base64 PNG)를 빼서 파일 크기 절약
+    analysis_json = {k: v for k, v in analysis.items() if k != "charts"}
     with open(jpath, "w", encoding="utf-8") as f:
-        json.dump(analysis, f, ensure_ascii=False, indent=2)
+        json.dump(analysis_json, f, ensure_ascii=False, indent=2)
     with open(hpath, "w", encoding="utf-8") as f:
         f.write(build_html(analysis))
 
