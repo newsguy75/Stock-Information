@@ -1,11 +1,11 @@
 {
-  "updated": "2026-08-07 12:50 (VN)",
+  "updated": "2026-08-07 13:47 (VN)",
   "count": 21,
   "items": [
     {
       "name": "KOSPI",
       "code": "KS11",
-      "chg": -1.26,
+      "chg": -0.6,
       "group": "지수",
       "verdict": "약세/조정 주의",
       "bear": true
@@ -13,7 +13,7 @@
     {
       "name": "KOSDAQ",
       "code": "KQ11",
-      "chg": -2.46,
+      "chg": -0.36,
       "group": "지수",
       "verdict": "보합 예상",
       "bear": true
@@ -21,63 +21,63 @@
     {
       "name": "TK Corporation",
       "code": "023160",
-      "chg": 1.08,
-      "group": "보유종목",
-      "verdict": "원만한 상승 예상",
-      "bear": true
-    },
-    {
-      "name": "대한항공",
-      "code": "003490",
-      "chg": -1.82,
-      "group": "보유종목",
-      "verdict": "적극 매수 관점",
-      "bear": false
-    },
-    {
-      "name": "두산에너빌리티",
-      "code": "034020",
-      "chg": 0.0,
-      "group": "보유종목",
-      "verdict": "적극 매수 관점",
-      "bear": true
-    },
-    {
-      "name": "한국항공우주",
-      "code": "047810",
-      "chg": 1.0,
+      "chg": 0.22,
       "group": "보유종목",
       "verdict": "약세/조정 주의",
       "bear": true
     },
     {
-      "name": "에이비엘바이오",
-      "code": "298380",
-      "chg": 3.72,
+      "name": "대한항공",
+      "code": "003490",
+      "chg": -1.27,
       "group": "보유종목",
-      "verdict": "적극 매수 관점",
+      "verdict": "원만한 상승 예상",
       "bear": false
     },
     {
-      "name": "이수페타시스",
-      "code": "007660",
-      "chg": -1.44,
+      "name": "두산에너빌리티",
+      "code": "034020",
+      "chg": 0.92,
       "group": "보유종목",
       "verdict": "원만한 상승 예상",
       "bear": true
     },
     {
+      "name": "한국항공우주",
+      "code": "047810",
+      "chg": 2.73,
+      "group": "보유종목",
+      "verdict": "완만한 상승/반등 시도",
+      "bear": true
+    },
+    {
+      "name": "에이비엘바이오",
+      "code": "298380",
+      "chg": 3.96,
+      "group": "보유종목",
+      "verdict": "원만한 상승 예상",
+      "bear": false
+    },
+    {
+      "name": "이수페타시스",
+      "code": "007660",
+      "chg": -0.96,
+      "group": "보유종목",
+      "verdict": "보합 예상",
+      "bear": true
+    },
+    {
       "name": "현대건설",
       "code": "000720",
-      "chg": -4.62,
+      "chg": -2.4,
       "group": "보유종목",
-      "verdict": "적극 매수 관점",
+      "verdict": "완만한 상승/반등 시도",
       "bear": true
     },
     {
       "name": "세아제강",
       "code": "306200",
-      "chg": 0.31,
+      "chg": 1.07,
       "group": "보유종목",
       "verdict": "적극 매수 관점",
       "bear": false
@@ -85,23 +85,23 @@
     {
       "name": "동성화인텍",
       "code": "033500",
-      "chg": -1.28,
+      "chg": -0.82,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "완만한 상승/반등 시도",
       "bear": true
     },
     {
       "name": "LS ELECTRIC",
       "code": "010120",
-      "chg": -1.88,
+      "chg": -0.74,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "완만한 상승/반등 시도",
       "bear": false
     },
     {
       "name": "클래시스",
       "code": "214150",
-      "chg": -0.11,
+      "chg": 0.77,
       "group": "보유종목",
       "verdict": "원만한 상승 예상",
       "bear": true
@@ -109,15 +109,15 @@
     {
       "name": "원텍",
       "code": "336570",
-      "chg": -0.58,
+      "chg": -0.38,
       "group": "보유종목",
-      "verdict": "적극 매수 관점",
+      "verdict": "완만한 상승/반등 시도",
       "bear": true
     },
     {
       "name": "한국전력",
       "code": "015760",
-      "chg": -1.39,
+      "chg": -0.97,
       "group": "보유종목",
       "verdict": "원만한 상승 예상",
       "bear": false
@@ -125,7 +125,7 @@
     {
       "name": "우진",
       "code": "105840",
-      "chg": -3.25,
+      "chg": -1.22,
       "group": "보유종목",
       "verdict": "완만한 상승/반등 시도",
       "bear": true
@@ -133,26 +133,26 @@
     {
       "name": "화신",
       "code": "010690",
-      "chg": -2.07,
-      "group": "보유종목",
-      "verdict": "적극 매수 관점",
-      "bear": true
-    },
-    {
-      "name": "코스모신소재",
-      "code": "005070",
-      "chg": 1.39,
+      "chg": -1.83,
       "group": "보유종목",
       "verdict": "완만한 상승/반등 시도",
       "bear": true
     },
     {
+      "name": "코스모신소재",
+      "code": "005070",
+      "chg": 1.81,
+      "group": "보유종목",
+      "verdict": "보합 예상",
+      "bear": true
+    },
+    {
       "name": "리가켐바이오",
       "code": "141080",
-      "chg": 0.9,
+      "chg": 2.07,
       "group": "보유종목",
-      "verdict": "적극 매수 관점",
-      "bear": true
+      "verdict": "완만한 상승/반등 시도",
+      "bear": false
     },
     {
       "name": "SK증권우",
@@ -165,9 +165,9 @@
     {
       "name": "범한퓨얼셀",
       "code": "382900",
-      "chg": -1.14,
+      "chg": -1.01,
       "group": "보유종목",
-      "verdict": "적극 매수 관점",
+      "verdict": "보합 예상",
       "bear": true
     }
   ]
