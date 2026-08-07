@@ -866,7 +866,7 @@ def build_monthly_verdict(stoch: dict, div: dict, monthly: pd.DataFrame) -> dict
 # ======================================================================
 def analyze_stock(name: str, code: str, daily: pd.DataFrame,
                    monthly: pd.DataFrame, hourly: pd.DataFrame,
-                   demo: bool = False) -> dict:
+                   demo: bool = False, is_index: bool = False) -> dict:
     # 일봉은 60일치로 분석(스토캐 워밍업 여유 포함), 월봉은 5년(60개월)까지 사용
     daily60 = daily.tail(80) if len(daily) > 80 else daily          # 지표 워밍업 여유 포함
     # 월봉: 5년 소스 반영 → 다이버전스/스토캐는 전체(최대 60개월) 사용
@@ -874,8 +874,13 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
 
     stoch = analyze_stoch_frames(hourly, daily60, monthly_full)
     ma = analyze_ma(daily, lookback_days=60)
-    supply = analyze_supply_demand(code, demo=demo)
-    short = analyze_shorting(code, demo=demo)
+    if is_index:
+        # 지수는 투자자별 수급·공매도 데이터가 종목처럼 제공되지 않음 → skip
+        supply = {"ok": False, "summary": "지수는 수급 데이터 해당 없음"}
+        short = {"ok": False, "summary": "지수는 공매도 데이터 해당 없음"}
+    else:
+        supply = analyze_supply_demand(code, demo=demo)
+        short = analyze_shorting(code, demo=demo)
     div = analyze_divergence_detail(daily60, monthly_full, hourly)
 
     # 하락 경고 (일봉 하락다이버전스/쌍봉/데드캣바운스) — 최우선 강조
@@ -928,7 +933,9 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
 
     return {
         "name": name, "code": code,
-        "price": round(last_close), "change_pct": round(chg, 2),
+        "price": (round(last_close, 2) if is_index else round(last_close)),
+        "is_index": is_index,
+        "change_pct": round(chg, 2),
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "data_freshness": data_freshness,   # 각 프레임 마지막 봉 날짜
         "bear_warnings": bear,      # 2-B 하락 경고 (최우선)
