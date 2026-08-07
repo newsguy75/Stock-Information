@@ -563,8 +563,10 @@ def analyze_pullback(daily: pd.DataFrame, stoch_daily: dict = None,
             "opinion": " / ".join(opinion_bits) if opinion_bits else "",
             "price": round(px)}
 def analyze_supply_demand(code: str, demo: bool = False) -> dict:
-    """pykrx 투자자별 순매수(5일/20일/60일) + 각 주체 매매비중.
-    KRX 회원제 전환으로 실패 가능 → 방어적 폴백."""
+    """종목별 외인/기관/개인 순매수(5일/20일/60일) + 비중.
+    1차: 네이버 크롤링 (전일까지 확정치, 정확도 높음)
+    2차: pykrx 폴백
+    """
     if demo:
         return {"ok": True, "demo": True,
                 "foreign": {"d5": 12000, "d20": -30000, "d60": 45000},
@@ -574,6 +576,49 @@ def analyze_supply_demand(code: str, demo: bool = False) -> dict:
                 "main_5d": "외인", "main_20d": "기관",
                 "summary": ("외인 5일 매수·20일 매도·60일 매수 / 기관 5일·20일·60일 매수 / "
                             "개인비중 42%(외35·기23) → 단기 외인 주도")}
+
+    # 1차: 네이버 크롤링 (종목별 정확한 확정치)
+    try:
+        from naver_supply import fetch_naver_supply, summarize_supply
+        df = fetch_naver_supply(code, need_days=65)
+        s = summarize_supply(df)
+        if s.get("ok"):
+            f5, f20, f60 = s["foreign_won"]["d5"], s["foreign_won"]["d20"], s["foreign_won"]["d60"]
+            i5, i20, i60 = s["inst_won"]["d5"], s["inst_won"]["d20"], s["inst_won"]["d60"]
+            # 개인 = -(외인 + 기관) 근사 (네이버 페이지엔 개인 컬럼 없음)
+            p5, p20, p60 = -(f5 + i5), -(f20 + i20), -(f60 + i60)
+
+            total20 = abs(f20) + abs(i20) + abs(p20)
+            r_f = (abs(f20) / total20 * 100) if total20 else 0
+            r_i = (abs(i20) / total20 * 100) if total20 else 0
+            r_p = (abs(p20) / total20 * 100) if total20 else 0
+
+            def side(v):
+                return "매수" if v > 0 else "매도"
+
+            main_5d = max([("외인", abs(f5)), ("기관", abs(i5)), ("개인", abs(p5))],
+                          key=lambda x: x[1])[0]
+            main_20d = max([("외인", abs(f20)), ("기관", abs(i20)), ("개인", abs(p20))],
+                           key=lambda x: x[1])[0]
+
+            summary = (f"외인 5일 {side(f5)}·20일 {side(f20)}·60일 {side(f60)} / "
+                       f"기관 5일 {side(i5)}·20일 {side(i20)}·60일 {side(i60)} / "
+                       f"개인비중 {r_p:.0f}%(외{r_f:.0f}·기{r_i:.0f}) → 단기 {main_5d} 주도")
+
+            print(f"[수급-네이버] {code} 5일: 외인 {f5/1e8:+.0f}억, 기관 {i5/1e8:+.0f}억 (확정치 {s['last_date']} 기준)")
+
+            return {"ok": True, "source": "naver",
+                    "last_date": s["last_date"],
+                    "foreign": {"d5": int(f5), "d20": int(f20), "d60": int(f60)},
+                    "inst": {"d5": int(i5), "d20": int(i20), "d60": int(i60)},
+                    "indiv": {"d5": int(p5), "d20": int(p20), "d60": int(p60)},
+                    "ratio": {"foreign": round(r_f, 1), "inst": round(r_i, 1), "indiv": round(r_p, 1)},
+                    "main_5d": main_5d, "main_20d": main_20d,
+                    "summary": summary}
+    except Exception as e:
+        print(f"[warn] 네이버 수급 크롤링 실패 {code}: {e} → pykrx 폴백")
+
+    # 2차: pykrx 폴백
     try:
         from pykrx import stock
         end = dt.date.today()
