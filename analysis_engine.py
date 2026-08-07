@@ -578,26 +578,56 @@ def analyze_supply_demand(code: str, demo: bool = False) -> dict:
         from pykrx import stock
         end = dt.date.today()
         e = end.strftime("%Y%m%d")
-        # 넉넉히 90일 조회 후 최근 N 거래일만 slice (실제 거래일 기준 정확히 자르기)
         s90 = (end - dt.timedelta(days=90)).strftime("%Y%m%d")
         df_full = stock.get_market_trading_value_by_date(s90, e, code)
         if df_full is None or len(df_full) == 0:
             return {"ok": False, "err": "pykrx 반환 없음"}
         df_full = df_full.sort_index()
 
+        # 진단: 실제 pykrx가 반환한 컬럼 로그
+        print(f"[수급진단] {code} pykrx 컬럼: {list(df_full.columns)}")
+        print(f"[수급진단] {code} 최근 5행:\n{df_full.tail(5)}")
+
+        # 기관 그룹 세분화 컬럼 (기관합계가 없을 때 합산 대상)
+        INSTITUTIONAL_PARTS = ["금융투자", "보험", "투신", "사모", "은행",
+                                "기타금융", "연기금", "국가"]
+
         def net(df_):
-            """실제 컬럼명 방어적 매칭. pykrx가 반환하는 컬럼:
-            개인, 외국인, 기관합계, 기타법인, 전체 (또는 세분화된 기관 그룹)"""
+            """실제 컬럼명 방어적 매칭.
+            pykrx 반환 컬럼 예: 개인, 외국인, 기관합계, 기타법인, 전체
+            또는 세분화: 금융투자, 보험, 투신, 사모, 은행, 기타금융, 연기금 등
+            """
             cols = list(df_.columns)
-            fo_col = next((c for c in cols if "외국인합계" in c or c == "외국인"), None)
-            ins_col = next((c for c in cols if "기관합계" in c), None)
-            ind_col = next((c for c in cols if c == "개인"), None)
-            fo = df_[fo_col].sum() if fo_col else 0.0
-            ins = df_[ins_col].sum() if ins_col else 0.0
-            ind = df_[ind_col].sum() if ind_col else 0.0
+
+            # 외국인 (외국인합계 우선, 없으면 외국인 + 기타외국인)
+            if "외국인합계" in cols:
+                fo = df_["외국인합계"].sum()
+            elif "외국인" in cols:
+                fo = df_["외국인"].sum()
+                if "기타외국인" in cols:
+                    fo += df_["기타외국인"].sum()
+            else:
+                fo = 0.0
+
+            # 기관 (기관합계 우선, 없으면 세분화 그룹 합산)
+            if "기관합계" in cols:
+                ins = df_["기관합계"].sum()
+            else:
+                ins = 0.0
+                found_any = False
+                for part in INSTITUTIONAL_PARTS:
+                    if part in cols:
+                        ins += df_[part].sum()
+                        found_any = True
+                if not found_any:
+                    ins = 0.0
+
+            # 개인
+            ind = df_["개인"].sum() if "개인" in cols else 0.0
+
             return float(fo), float(ins), float(ind)
 
-        # 최근 N 거래일 정확히 slice (달력일이 아닌 실제 거래일 기준)
+        # 최근 N 거래일 정확히 slice
         df5 = df_full.tail(5)
         df20 = df_full.tail(20)
         df60 = df_full.tail(60)
@@ -605,7 +635,10 @@ def analyze_supply_demand(code: str, demo: bool = False) -> dict:
         f20, i20, p20 = net(df20)
         f60, i60, p60 = net(df60)
 
-        # 실제 잡힌 거래일 수 표시 (디버깅용, 20일 미만이면 데이터 부족 안내)
+        # 진단: 계산된 값
+        print(f"[수급진단] {code} 5일: 외인={f5/1e8:.0f}억 기관={i5/1e8:.0f}억 개인={p5/1e8:.0f}억")
+        print(f"[수급진단] {code} 20일: 외인={f20/1e8:.0f}억 기관={i20/1e8:.0f}억 개인={p20/1e8:.0f}억")
+
         n5, n20, n60 = len(df5), len(df20), len(df60)
 
         # 20일 기준 매매비중 (절대값 기준 점유율)
