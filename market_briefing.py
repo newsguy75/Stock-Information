@@ -16,6 +16,7 @@ market_briefing.py
 """
 from __future__ import annotations
 import os
+import re
 import json
 import time
 import datetime as dt
@@ -163,6 +164,141 @@ def fetch_kr_top_movers(market: str = "kospi", top_n: int = 10) -> dict:
 
 
 # ======================================================================
+# 2-B. 시장 매매동향 (개인/외국인/기관 - 억원 단위)
+# ======================================================================
+def fetch_market_investor_summary() -> dict:
+    """네이버 시장 실시간 투자자별 매매동향.
+    URL: finance.naver.com/sise/investorDealTrendTime.naver
+    또는 폴백: finance.naver.com/sise/sise_index.naver?code=KOSPI (지수 페이지)
+    
+    반환: {kospi: {개인, 외국인, 기관}, kosdaq: {...}} 단위: 억원"""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return {"ok": False, "err": "bs4 미설치"}
+
+    # 네이버 시황 페이지 (sise/sise_index.naver) 에는 각 시장별 투자자 매매 요약이 있음
+    result = {}
+    for market_code, key in [("KOSPI", "kospi"), ("KOSDAQ", "kosdaq")]:
+        try:
+            url = f"https://finance.naver.com/sise/sise_index.naver?code={market_code}"
+            r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+            r.encoding = "euc-kr"
+            soup = BeautifulSoup(r.text, "html.parser")
+
+            # 매매동향 테이블 찾기 - "매매동향" 텍스트 근처의 표
+            invest = {"개인": None, "외국인": None, "기관": None}
+            # 페이지에 "개인" "외국인" "기관계" 텍스트가 나오는 표를 찾음
+            for table in soup.find_all("table"):
+                text = table.get_text()
+                if "개인" in text and "외국인" in text and ("기관" in text):
+                    # 표 안에서 각 라벨 옆의 숫자를 앵커링으로 찾음
+                    for tr in table.find_all("tr"):
+                        cells = tr.find_all(["th", "td"])
+                        if len(cells) < 2:
+                            continue
+                        label = cells[0].get_text(strip=True)
+                        for k in ["개인", "외국인", "기관"]:
+                            if k in label and invest[k] is None:
+                                # 옆 셀에서 숫자 추출 (억원 단위)
+                                val_txt = cells[1].get_text(strip=True)
+                                val_txt = val_txt.replace(",", "").replace("+", "")
+                                try:
+                                    # 부호 처리
+                                    sign = -1 if "-" in val_txt else 1
+                                    val_txt = val_txt.replace("-", "")
+                                    num = float(re.sub(r"[^\d.]", "", val_txt))
+                                    invest[k] = sign * num
+                                except (ValueError, TypeError):
+                                    pass
+                    # 다 채워지면 그만
+                    if all(v is not None for v in invest.values()):
+                        break
+
+            if all(v is not None for v in invest.values()):
+                result[key] = invest
+        except Exception as e:
+            print(f"[warn] {market_code} 매매동향 실패: {e}")
+            continue
+
+    if result:
+        return {"ok": True, **result}
+    return {"ok": False, "err": "매매동향 파싱 실패"}
+
+
+# ======================================================================
+# 2-C. 거래대금 상위 20 (코스피/코스닥)
+# ======================================================================
+def fetch_top_trading_value(market: str = "kospi", top_n: int = 20) -> dict:
+    """거래대금 상위 종목.
+    URL: finance.naver.com/sise/sise_quant.naver?sosok=0 (코스피)
+         finance.naver.com/sise/sise_quant.naver?sosok=1 (코스닥)
+    반환: [{rank, name, price, change_pct, volume, value}]"""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return {"ok": False, "err": "bs4 미설치"}
+
+    sosok = "0" if market.lower() == "kospi" else "1"
+    url = f"https://finance.naver.com/sise/sise_quant.naver?sosok={sosok}"
+    try:
+        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        r.encoding = "euc-kr"
+        soup = BeautifulSoup(r.text, "html.parser")
+        table = soup.find("table", class_="type_2")
+        if not table:
+            return {"ok": False, "err": "표 없음"}
+
+        rows = []
+        rank = 0
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if len(tds) < 8:
+                continue
+            a = tds[1].find("a") if len(tds) > 1 else None
+            if not a:
+                continue
+            name = a.get_text(strip=True)
+            if not name:
+                continue
+            try:
+                rank += 1
+                price = tds[2].get_text(strip=True).replace(",", "")
+                # 등락률 (tds[4] 근처)
+                chg_pct_txt = tds[4].get_text(strip=True).replace(",", "").replace("%", "")
+                if not chg_pct_txt.startswith("-") and not chg_pct_txt.startswith("+"):
+                    # 클래스로 방향 확인
+                    cls = " ".join(tds[4].get("class", []))
+                    if "nv01" in cls or "down" in cls.lower():
+                        chg_pct_txt = "-" + chg_pct_txt
+                    else:
+                        chg_pct_txt = "+" + chg_pct_txt
+                # 거래대금 (거래대금은 보통 tds[7])
+                value_txt = tds[7].get_text(strip=True).replace(",", "")
+                # 거래량 (tds[5])
+                volume_txt = tds[5].get_text(strip=True).replace(",", "")
+
+                rows.append({
+                    "rank": rank,
+                    "name": name,
+                    "price": int(price) if price.isdigit() else 0,
+                    "change_pct": float(chg_pct_txt) if chg_pct_txt else 0,
+                    "volume": int(volume_txt) if volume_txt.isdigit() else 0,
+                    "value": int(value_txt) if value_txt.isdigit() else 0,  # 백만원 단위
+                })
+                if len(rows) >= top_n:
+                    break
+            except (ValueError, IndexError):
+                continue
+
+        return {"ok": True, "market": market.upper(), "items": rows[:top_n]}
+    except Exception as e:
+        return {"ok": False, "err": str(e)}
+
+
+# ======================================================================
 # 3. 시황 뉴스 헤드라인 (네이버 금융 뉴스)
 # ======================================================================
 def fetch_market_news(top_n: int = 5) -> list[dict]:
@@ -236,6 +372,22 @@ def _demo_data() -> dict:
             "10년 국채": {"close": 4.676, "change_pct": 0.5, "date": "2026-08-06"},
             "원달러": {"close": 1385.4, "change_pct": -0.3, "date": "2026-08-06"},
         },
+        "market_flow": {
+            "ok": True,
+            "kospi": {"개인": -11853, "외국인": 14514, "기관": -2817},
+            "kosdaq": {"개인": 3950, "외국인": -2971, "기관": -1108},
+        },
+        "kospi_top_value": {
+            "ok": True, "market": "KOSPI",
+            "items": [
+                {"rank": 1, "name": "SK하이닉스", "price": 1668000, "change_pct": 5.77, "value": 3200000},
+                {"rank": 2, "name": "삼성전자", "price": 246500, "change_pct": 2.71, "value": 2100000},
+                {"rank": 3, "name": "삼성전기", "price": 1351000, "change_pct": 14.01, "value": 1800000},
+                {"rank": 4, "name": "SK스퀘어", "price": 1119000, "change_pct": 5.57, "value": 1500000},
+                {"rank": 5, "name": "대원전선", "price": 15450, "change_pct": 12.04, "value": 1200000},
+            ],
+        },
+        "kosdaq_top_value": {"ok": True, "market": "KOSDAQ", "items": []},
         "kr_kospi_top": {
             "ok": True, "market": "KOSPI",
             "rise": [
@@ -247,6 +399,7 @@ def _demo_data() -> dict:
                 {"name": "SK하이닉스", "price": 195000, "change_pct": -2.68},
             ],
         },
+        "kr_kosdaq_top": {"ok": True, "market": "KOSDAQ", "rise": [], "fall": []},
         "news": [
             {"title": "편의점 3사 2분기 어닝서프라이즈, BGF리테일 15% 급등",
              "summary": "편의점 3사가 예상을 뛰어넘는 실적을 발표하며...",
@@ -268,6 +421,9 @@ def collect_all(demo: bool = False) -> dict:
         "us_indices": fetch_us_indices(),
         "us_stocks": fetch_us_stocks(),
         "commodities": fetch_commodities(),
+        "market_flow": fetch_market_investor_summary(),
+        "kospi_top_value": fetch_top_trading_value("kospi", 20),
+        "kosdaq_top_value": fetch_top_trading_value("kosdaq", 20),
         "kr_kospi_top": fetch_kr_top_movers("kospi"),
         "kr_kosdaq_top": fetch_kr_top_movers("kosdaq"),
         "news": fetch_market_news(),
@@ -285,6 +441,18 @@ def _icon(chg: float) -> str:
 def build_kakao_text(data: dict) -> str:
     now_vn = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=7)
     lines = [f"📊 시장 브리핑 (VN {now_vn:%m/%d %H:%M})", "─" * 22]
+
+    # 시장 매매동향 (개인/외국인/기관 - 억원)
+    mf = data.get("market_flow", {})
+    if mf.get("ok"):
+        lines.append("💹 매매동향 (억원)")
+        for market_key, label in [("kospi", "코스피"), ("kosdaq", "코스닥")]:
+            m = mf.get(market_key)
+            if m:
+                def fmt(v):
+                    return f"{v:+,.0f}"
+                lines.append(f"  {label}: 개인 {fmt(m['개인'])} · 외인 {fmt(m['외국인'])} · 기관 {fmt(m['기관'])}")
+        lines.append("")
 
     # 미국 지수
     lines.append("🇺🇸 미국 전일 마감")
@@ -305,6 +473,14 @@ def build_kakao_text(data: dict) -> str:
         lines.append("💻 미국 반도체·테크")
         for name, r in data["us_stocks"].items():
             lines.append(f"  {_icon(r['change_pct'])} {name} ({r['change_pct']:+.2f}%)")
+
+    # 거래대금 상위 5 (코스피)
+    kv = data.get("kospi_top_value", {})
+    if kv.get("ok") and kv.get("items"):
+        lines.append("")
+        lines.append("💵 코스피 거래대금 TOP5")
+        for it in kv["items"][:5]:
+            lines.append(f"  {it['rank']}. {it['name']} ({it['change_pct']:+.2f}%)")
 
     # 국내 상승/하락 TOP
     kospi = data.get("kr_kospi_top", {})
@@ -355,6 +531,65 @@ def build_html(data: dict) -> str:
         return (f'<div style="display:flex;padding:4px 0;border-top:1px solid {C_LINE}">'
                 f'<span style="color:{C_SUB};min-width:120px">{k}</span>'
                 f'<span style="flex:1">{v}</span></div>')
+
+    # 매매동향 (개인/외국인/기관)
+    mf = data.get("market_flow", {})
+    if mf.get("ok"):
+        def flow_row(label, m):
+            def cell(v):
+                c = color(v)
+                return f'<td style="text-align:right;padding:6px 10px;color:{c};font-weight:700">{v:+,.0f}</td>'
+            return (f'<tr><td style="padding:6px 10px;font-weight:600">{label}</td>'
+                    f'{cell(m["개인"])}{cell(m["외국인"])}{cell(m["기관"])}</tr>')
+        flow_inner = (
+            f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
+            f'<thead><tr style="border-bottom:1px solid {C_LINE}">'
+            f'<th style="padding:6px 10px;text-align:left;color:{C_SUB}">시장 (억원)</th>'
+            f'<th style="padding:6px 10px;text-align:right;color:{C_SUB}">개인</th>'
+            f'<th style="padding:6px 10px;text-align:right;color:{C_SUB}">외국인</th>'
+            f'<th style="padding:6px 10px;text-align:right;color:{C_SUB}">기관</th>'
+            f'</tr></thead><tbody>'
+        )
+        if mf.get("kospi"):
+            flow_inner += flow_row("코스피", mf["kospi"])
+        if mf.get("kosdaq"):
+            flow_inner += flow_row("코스닥", mf["kosdaq"])
+        flow_inner += '</tbody></table>'
+        flow_html = sec("💹 시장 매매동향 (억원)", flow_inner)
+    else:
+        flow_html = ''
+
+    # 거래대금 상위 20
+    def value_top_html(title, tv):
+        if not (tv and tv.get("ok") and tv.get("items")):
+            return ''
+        rows_html = []
+        for it in tv["items"][:20]:
+            c = color(it["change_pct"])
+            value_eok = it.get("value", 0) / 100  # 백만원 → 억원
+            rows_html.append(
+                f'<tr>'
+                f'<td style="padding:5px 10px;color:{C_SUB};text-align:center">{it["rank"]}</td>'
+                f'<td style="padding:5px 10px"><b>{it["name"]}</b></td>'
+                f'<td style="padding:5px 10px;text-align:right">{it["price"]:,}</td>'
+                f'<td style="padding:5px 10px;text-align:right;color:{c};font-weight:700">{it["change_pct"]:+.2f}%</td>'
+                f'<td style="padding:5px 10px;text-align:right;color:{C_SUB}">{value_eok:,.0f}억</td>'
+                f'</tr>'
+            )
+        inner = (
+            f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+            f'<thead><tr style="border-bottom:1px solid {C_LINE}">'
+            f'<th style="padding:6px 10px;text-align:center;color:{C_SUB}">#</th>'
+            f'<th style="padding:6px 10px;text-align:left;color:{C_SUB}">종목</th>'
+            f'<th style="padding:6px 10px;text-align:right;color:{C_SUB}">현재가</th>'
+            f'<th style="padding:6px 10px;text-align:right;color:{C_SUB}">등락률</th>'
+            f'<th style="padding:6px 10px;text-align:right;color:{C_SUB}">거래대금</th>'
+            f'</tr></thead><tbody>' + "".join(rows_html) + '</tbody></table>'
+        )
+        return sec(title, inner)
+
+    kospi_value_html = value_top_html("💵 코스피 거래대금 TOP20", data.get("kospi_top_value"))
+    kosdaq_value_html = value_top_html("💵 코스닥 거래대금 TOP20", data.get("kosdaq_top_value"))
 
     # 미국 지수
     us_idx_rows = []
@@ -433,7 +668,7 @@ def build_html(data: dict) -> str:
 <body><div class="wrap">
   <h1>📊 시장 브리핑</h1>
   <div class="meta">{now_vn:%Y년 %m월 %d일 %H:%M} (VN 기준)</div>
-  {us_idx_html}{comm_html}{us_stock_html}{kospi_html}{kosdaq_html}{news_html}
+  {flow_html}{us_idx_html}{comm_html}{us_stock_html}{kospi_html}{kosdaq_html}{kospi_value_html}{kosdaq_value_html}{news_html}
 </div></body></html>"""
 
 
