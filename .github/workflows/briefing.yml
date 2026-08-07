@@ -63,10 +63,22 @@ jobs:
           git add data/ viewer.html add.html || true
           if git diff --cached --quiet; then
             echo "변경사항 없음 — 커밋 skip"
-          else
-            git commit -m "chore: 포트폴리오 분석 데이터 $(date -u +'%Y-%m-%d %H:%M UTC')"
-            git push
+            exit 0
           fi
+          git commit -m "chore: 포트폴리오 분석 데이터 $(date -u +'%Y-%m-%d %H:%M UTC')"
+
+          # push 재시도 (다른 워크플로/Pages 배포와 충돌 시 rebase 후 재push)
+          for i in 1 2 3; do
+            if git push; then
+              echo "✓ push 성공 (시도 $i)"
+              exit 0
+            fi
+            echo "push 실패, rebase 후 재시도 ($i/3)"
+            git pull --rebase --autostash origin main || true
+            sleep 3
+          done
+          echo "✗ push 3회 재시도 모두 실패"
+          exit 1
 
 # 참고:
 #  - GitHub Actions cron 은 UTC 고정. 베트남/한국은 DST 없어 오프셋 불변이라 안전.
