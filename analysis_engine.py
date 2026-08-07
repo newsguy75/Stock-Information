@@ -70,24 +70,16 @@ def _stoch_dir(df: pd.DataFrame, k_period: int, k_smooth: int, d_period: int) ->
 def analyze_stoch_frames(hourly: pd.DataFrame, daily: pd.DataFrame,
                           monthly: pd.DataFrame) -> dict:
     """
-    1시간봉: 장기(40-20-20)/중기(20-10-10)/단기(5-3-3)
-    일봉:    장기(20-10-10)/중기(10-5-5)/단기(5-3-3)
-    월봉:    단기(5-3-3) 중심 (12개월 데이터 한계로 장기 생략)
+    1H/일봉/월봉 모든 프레임에서 3구간 스토캐:
+      단기(5-3-3) / 중기(10-5-5) / 장기(20-10-10)
     """
     out = {"hourly": {}, "daily": {}, "monthly": {}, "verdict": {}}
 
-    # --- 1시간봉 3구간 ---
-    out["hourly"]["장기"] = _stoch_dir(hourly, 40, 20, 20)
-    out["hourly"]["중기"] = _stoch_dir(hourly, 20, 10, 10)
-    out["hourly"]["단기"] = _stoch_dir(hourly, 5, 3, 3)
-    # --- 일봉 3구간 ---
-    out["daily"]["장기"] = _stoch_dir(daily, 20, 10, 10)
-    out["daily"]["중기"] = _stoch_dir(daily, 10, 5, 5)
-    out["daily"]["단기"] = _stoch_dir(daily, 5, 3, 3)
-    # --- 월봉 (5년=60개월 확보 시 장기까지) ---
-    out["monthly"]["장기"] = _stoch_dir(monthly, 20, 10, 10)
-    out["monthly"]["중기"] = _stoch_dir(monthly, 10, 5, 5)
-    out["monthly"]["단기"] = _stoch_dir(monthly, 5, 3, 3)
+    # 세 프레임 모두 동일 파라미터로 통일
+    for frame_key, df in [("hourly", hourly), ("daily", daily), ("monthly", monthly)]:
+        out[frame_key]["단기"] = _stoch_dir(df, 5, 3, 3)
+        out[frame_key]["중기"] = _stoch_dir(df, 10, 5, 5)
+        out[frame_key]["장기"] = _stoch_dir(df, 20, 10, 10)
 
     out["verdict"] = _stoch_verdict(out)
     return out
@@ -630,12 +622,16 @@ def analyze_shorting(code: str, demo: bool = False) -> dict:
 def analyze_divergence_detail(daily: pd.DataFrame, monthly: pd.DataFrame,
                                hourly: pd.DataFrame) -> dict:
     out = {}
+    # 프레임별 유효기간(봉 단위): 오래된 다이버전스는 이미 소진됐다고 보고 필터
+    #  일봉 15봉 ≈ 3주, 월봉 3봉 ≈ 3개월, 1H 40봉 ≈ 5거래일
+    max_age_by = {"일봉": 15, "월봉": 3, "1H": 40}
     for label, df in [("일봉", daily), ("월봉", monthly), ("1H", hourly)]:
         if df is None or len(df) < 20:
             out[label] = {"ok": False}
             continue
         try:
-            divs = detect_divergence(df, stochastic(df))
+            divs = detect_divergence(df, stochastic(df),
+                                     max_age=max_age_by.get(label, 15))
         except Exception:
             divs = []
         if not divs:
@@ -875,8 +871,18 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
     stoch = analyze_stoch_frames(hourly, daily60, monthly_full)
     ma = analyze_ma(daily, lookback_days=60)
     if is_index:
-        # 지수는 투자자별 수급·공매도 데이터가 종목처럼 제공되지 않음 → skip
-        supply = {"ok": False, "summary": "지수는 수급 데이터 해당 없음"}
+        # 지수: 종목별 수급/공매도는 해당 없음 → 시장 통계로 대체
+        from data_feed import fetch_market_breadth, fetch_market_investor_flow
+        supply = {"ok": False, "summary": "지수는 수급 데이터 해당 없음",
+                  "market_breadth": (fetch_market_breadth(code) if not demo else
+                                     {"ok": True, "market": code, "total": 950,
+                                      "up": 520, "down": 380, "flat": 50,
+                                      "upper_limit": 3, "lower_limit": 1, "up_ratio": 54.7}),
+                  "investor_flow": (fetch_market_investor_flow(code) if not demo else
+                                    {"ok": True, "market": code,
+                                     "foreign": 82_000_000_000,
+                                     "inst": -45_000_000_000,
+                                     "indiv": -37_000_000_000})}
         short = {"ok": False, "summary": "지수는 공매도 데이터 해당 없음"}
     else:
         supply = analyze_supply_demand(code, demo=demo)

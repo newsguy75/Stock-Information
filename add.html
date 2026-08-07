@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>종목 추가 · 포트폴리오</title>
+<style>
+  :root {
+    --bg:#0f1115; --card:#1a1d24; --line:#2a2e37; --text:#e6e8ec;
+    --sub:#9aa0aa; --up:#e2483d; --down:#3b7be0; --accent:#4a90d9;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,'Malgun Gothic',sans-serif; padding:16px;
+    max-width:640px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--sub); font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:16px; margin-top:14px; }
+  label { display:block; font-size:12px; color:var(--sub); margin-bottom:4px;
+    text-transform:uppercase; letter-spacing:.04em; }
+  input[type=text] { width:100%; background:#12151b; color:var(--text);
+    border:1px solid var(--line); border-radius:8px; padding:12px 14px;
+    font-size:16px; font-family:monospace; letter-spacing:.05em; }
+  input[type=text]:focus { outline:none; border-color:var(--accent); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
+    padding:12px 20px; font-size:15px; font-weight:600; cursor:pointer;
+    margin-top:10px; width:100%; }
+  button:disabled { background:#3a4150; cursor:not-allowed; }
+  button.secondary { background:transparent; border:1px solid var(--line); color:var(--text); }
+  .result { margin-top:10px; padding:12px; background:#12151b; border-radius:8px; font-size:14px; }
+  .result.ok { border-left:3px solid var(--up); }
+  .result.err { border-left:3px solid var(--down); color:#ff8a94; }
+  .result .name { font-size:17px; font-weight:700; margin-bottom:4px; }
+  .result .meta { color:var(--sub); font-size:13px; }
+  code { background:#12151b; padding:2px 6px; border-radius:4px; font-family:monospace;
+    font-size:13px; word-break:break-all; }
+  pre { background:#12151b; padding:12px; border-radius:8px; overflow-x:auto;
+    font-size:13px; color:var(--text); }
+  .step { display:flex; gap:10px; align-items:baseline; padding:6px 0; }
+  .step .n { background:var(--accent); color:#fff; width:22px; height:22px;
+    border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; flex-shrink:0; }
+  .nav { display:flex; gap:8px; margin-top:16px; }
+  .nav a { color:var(--sub); text-decoration:none; font-size:13px; }
+  .nav a:hover { color:var(--accent); }
+</style>
+</head>
+<body>
+  <h1>📈 종목 추가</h1>
+  <div class="sub">종목코드 6자리를 입력하면 자동으로 조회합니다.</div>
+
+  <div class="card">
+    <label for="code">종목코드</label>
+    <input type="text" id="code" placeholder="예: 005930" maxlength="6" pattern="[0-9]{6}"
+           oninput="onInput()" onkeypress="if(event.key==='Enter') lookup()">
+    <button id="btn" onclick="lookup()" disabled>조회</button>
+    <div id="result"></div>
+  </div>
+
+  <div class="card" id="commit-card" style="display:none">
+    <div style="font-weight:600;margin-bottom:8px">📋 holdings.json 에 추가하기</div>
+
+    <div class="step"><span class="n">1</span><div>
+      아래 스니펫을 <b>복사</b>하세요 (자동 복사됨):
+      <pre id="snippet"></pre>
+      <button class="secondary" onclick="copySnippet()">📎 다시 복사</button>
+    </div></div>
+
+    <div class="step"><span class="n">2</span><div>
+      GitHub 레포의 <code>holdings.json</code> 을 열어 <b>연필 아이콘</b>으로 편집:
+      <br><a id="edit-link" href="#" target="_blank" style="color:var(--accent)">→ holdings.json 편집 페이지 열기</a>
+    </div></div>
+
+    <div class="step"><span class="n">3</span><div>
+      <code>"holdings"</code> 배열 마지막 항목 뒤에 <b>붙여넣기</b> → 하단
+      <b>"Commit changes"</b> 클릭.
+    </div></div>
+
+    <div class="step"><span class="n">4</span><div>
+      다음 자동 실행(최대 30분 뒤) 때부터 반영됩니다.
+      즉시 반영하려면 Actions 탭에서 워크플로 수동 실행.
+    </div></div>
+  </div>
+
+  <div class="nav">
+    <a href="viewer.html">← 뷰어로 돌아가기</a>
+  </div>
+
+<script>
+// ========== 설정 ==========
+// 아래 두 값은 자기 레포에 맞춰 자동 감지 (Pages URL 기준).
+// 예: https://newsguy75.github.io/Stock-Information/add.html
+//    → owner=newsguy75, repo=Stock-Information
+const path = location.pathname.split("/").filter(Boolean);
+const REPO = path[0] || "Stock-Information";   // pages 서브패스
+const OWNER = location.hostname.split(".")[0]; // <owner>.github.io
+
+let looked = null;
+
+function onInput(){
+  const v = document.getElementById("code").value.replace(/\D/g,"").slice(0,6);
+  document.getElementById("code").value = v;
+  document.getElementById("btn").disabled = v.length !== 6;
+  document.getElementById("result").innerHTML = "";
+  document.getElementById("commit-card").style.display = "none";
+}
+
+async function lookup(){
+  const code = document.getElementById("code").value.trim();
+  if (code.length !== 6) return;
+  const res = document.getElementById("result");
+  res.className = "result";
+  res.innerHTML = '<div class="meta">조회 중...</div>';
+
+  // 네이버 종목 조회 - CORS 우회를 위해 corsproxy.io 경유
+  // (직접 호출은 브라우저 CORS 정책으로 차단됨)
+  const url = `https://corsproxy.io/?${encodeURIComponent("https://polling.finance.naver.com/api/realtime/domestic/stock/" + code)}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const d = j?.datas?.[0];
+    if (!d || !d.stockName) throw new Error("종목을 찾을 수 없음");
+
+    const name = d.stockName;
+    const price = d.closePrice || d.currentPrice || "";
+    const chg = d.compareToPreviousClosePrice ?? "";
+    const chgPct = d.fluctuationsRatio ?? "";
+    const market = d.stockExchangeType?.name || d.marketValue || "";
+
+    looked = { code, name };
+    res.className = "result ok";
+    res.innerHTML = `
+      <div class="name">${name} <span class="meta">(${code})</span></div>
+      <div class="meta">${market ? market + " · " : ""}${price ? price + "원" : ""} ${chgPct ? "(" + (chgPct>0?"+":"") + chgPct + "%)" : ""}</div>
+    `;
+    showCommit(name, code);
+  } catch(e) {
+    res.className = "result err";
+    res.innerHTML = `조회 실패: ${e.message}<br><span class="meta">종목코드가 맞는지 확인하세요. 우선주는 뒤에 5가 붙습니다(예: SK증권우 001515).</span>`;
+    document.getElementById("commit-card").style.display = "none";
+  }
+}
+
+function showCommit(name, code){
+  const snippet = `    {"name": "${name}", "code": "${code}"},`;
+  document.getElementById("snippet").textContent = snippet;
+  navigator.clipboard.writeText(snippet).catch(()=>{});
+
+  const editUrl = `https://github.com/${OWNER}/${REPO}/edit/main/holdings.json`;
+  document.getElementById("edit-link").href = editUrl;
+  document.getElementById("commit-card").style.display = "block";
+}
+
+function copySnippet(){
+  navigator.clipboard.writeText(document.getElementById("snippet").textContent);
+  const btn = event.target;
+  const original = btn.textContent;
+  btn.textContent = "✓ 복사됨";
+  setTimeout(()=>btn.textContent=original, 1500);
+}
+</script>
+</body>
+</html>
