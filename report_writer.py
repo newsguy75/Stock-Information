@@ -242,8 +242,49 @@ def build_html(analysis: dict) -> str:
             f'<div class="row"><span class="k">수급주도</span><span class="v">단기(5일) <b>{sup.get("main_5d","?")}</b> / 중기(20일) <b>{sup.get("main_20d","?")}</b></span></div>'
         )
     else:
-        sup_inner = f'<div class="row"><span class="v na">{esc(sup.get("summary","수급 데이터 없음"))}</span></div>'
-    sup_html = _section("5. 거래량·수급 (외인·기관·개인 5·20·60일 + 비중)", sup_inner)
+        # 지수인 경우: 시장 폭(상승/하락/상하한) + 투자자 매매 표시
+        mb = sup.get("market_breadth", {}) if isinstance(sup.get("market_breadth"), dict) else {}
+        infl = sup.get("investor_flow", {}) if isinstance(sup.get("investor_flow"), dict) else {}
+        parts = []
+        if mb.get("ok"):
+            u, dn, fl = mb["up"], mb["down"], mb["flat"]
+            ul, ll = mb["upper_limit"], mb["lower_limit"]
+            src_tag = ("<span class='sub'>· 장중 실시간</span>"
+                       if mb.get("source") == "naver_crawl" else
+                       "<span class='sub'>· 확정치</span>")
+            parts.append(
+                f'<div class="row"><span class="k">시장 폭</span>'
+                f'<span class="v">'
+                f'<b style="color:{C_UP}">▲{u:,}</b> · '
+                f'<b style="color:{C_DOWN}">▼{dn:,}</b> · '
+                f'<span class="sub">보합 {fl:,}</span> '
+                f'<span class="sub">(상승비율 {mb["up_ratio"]}%)</span> {src_tag}</span></div>'
+                f'<div class="row"><span class="k">상하한가</span>'
+                f'<span class="v">'
+                f'상한 <b style="color:{C_UP}">{ul}</b> · '
+                f'하한 <b style="color:{C_DOWN}">{ll}</b></span></div>'
+            )
+        else:
+            parts.append(f'<div class="row"><span class="v na">시장 폭 데이터 없음{" ("+esc(mb.get("err",""))+")" if mb.get("err") else ""}</span></div>')
+
+        if infl.get("ok"):
+            def money_ix(v):
+                col = C_UP if v > 0 else (C_DOWN if v < 0 else C_SUB)
+                eok = v / 1e8
+                txt = f'{eok:+,.0f}억' if abs(eok) >= 1 else f'{v:+,.0f}'
+                return f'<b style="color:{col}">{txt}</b>'
+            src_tag2 = ("<span class='sub'>· 장중 실시간</span>"
+                        if infl.get("source") == "naver_crawl" else
+                        "<span class='sub'>· 확정치</span>")
+            parts.append(
+                f'<div class="row"><span class="k">외인 순매수</span><span class="v">{money_ix(infl["foreign"])} {src_tag2}</span></div>'
+                f'<div class="row"><span class="k">기관 순매수</span><span class="v">{money_ix(infl["inst"])}</span></div>'
+                f'<div class="row"><span class="k">개인 순매수</span><span class="v">{money_ix(infl["indiv"])}</span></div>'
+            )
+        else:
+            parts.append(f'<div class="row"><span class="v na">투자자 매매 데이터 없음{" ("+esc(infl.get("err",""))+")" if infl.get("err") else ""}</span></div>')
+        sup_inner = "".join(parts)
+    sup_html = _section("5. 거래량·수급 (외인·기관·개인 5·20·60일 + 비중)", sup_inner) if not a.get("is_index") else _section("5. 시장 현황 (상승/하락/상하한가 + 투자자 매매)", sup_inner)
 
     # 6. 공매도 (5·20·60일 구간별)
     sh = a["shorting"]
@@ -341,7 +382,8 @@ def build_html(analysis: dict) -> str:
   * {{ box-sizing:border-box; }}
   body {{ margin:0; background:{C_BG}; color:{C_TEXT};
     font-family:-apple-system,'Segoe UI','Malgun Gothic',sans-serif; font-size:14px; line-height:1.5; }}
-  .wrap {{ max-width:760px; margin:0 auto; padding:16px; }}
+  .wrap {{ max-width:1100px; margin:0 auto; padding:16px; }}
+  @media (max-width:800px) {{ .wrap {{ max-width:100%; padding:12px; }} }}
   .head {{ display:flex; align-items:baseline; gap:10px; padding-bottom:12px; border-bottom:1px solid {C_LINE}; margin-bottom:14px; }}
   .head h1 {{ font-size:20px; margin:0; }}
   .code {{ color:{C_SUB}; font-size:13px; }}
@@ -444,7 +486,8 @@ def write_day_index(analyses: list[dict], now: dt.datetime | None = None) -> str
 <title>포트폴리오 분석 {day}</title>
 <style>
   body {{ margin:0; background:{C_BG}; color:{C_TEXT}; font-family:-apple-system,'Malgun Gothic',sans-serif; }}
-  .wrap {{ max-width:760px; margin:0 auto; padding:16px; }}
+  .wrap {{ max-width:1100px; margin:0 auto; padding:16px; }}
+  @media (max-width:800px) {{ .wrap {{ max-width:100%; padding:12px; }} }}
   h1 {{ font-size:18px; }}
   .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px; }}
   .card {{ display:block; background:{C_CARD}; border:1px solid {C_LINE}; border-radius:10px;

@@ -161,6 +161,199 @@ def fetch_index_daily(symbol: str, years: float = 1.0) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------
+# 시장 통계 (KOSPI/KOSDAQ 상하한가·상승·하락 + 투자자별 매매)
+# ----------------------------------------------------------------------
+_MARKET_MAP = {"KS11": "KOSPI", "KQ11": "KOSDAQ"}
+
+
+def fetch_market_breadth(symbol: str) -> dict:
+    """당일 시장 폭 통계: 상승/하락/보합/상한/하한 종목 수.
+    1) pykrx (마감 확정치) → 2) 네이버 크롤링 (장중 실시간) 폴백."""
+    market = _MARKET_MAP.get(symbol)
+    if not market:
+        return {"ok": False, "err": "지수 코드 아님"}
+
+    # 1) pykrx 시도
+    try:
+        from pykrx import stock
+        today = dt.date.today().strftime("%Y%m%d")
+        df = stock.get_market_price_change_by_ticker(today, today, market=market)
+        if df is None or len(df) == 0:
+            yday = (dt.date.today() - dt.timedelta(days=1)).strftime("%Y%m%d")
+            df = stock.get_market_price_change_by_ticker(yday, yday, market=market)
+        if df is not None and len(df) > 0:
+            chg = df["등락률"]
+            up = int((chg > 0).sum()); down = int((chg < 0).sum()); flat = int((chg == 0).sum())
+            upper = int((chg >= 29.5).sum()); lower = int((chg <= -29.5).sum())
+            total = up + down + flat
+            return {"ok": True, "market": market, "total": total,
+                    "up": up, "down": down, "flat": flat,
+                    "upper_limit": upper, "lower_limit": lower,
+                    "up_ratio": round(up / total * 100, 1) if total else 0,
+                    "source": "pykrx"}
+    except Exception:
+        pass
+
+    # 2) 네이버 폴백 (장중)
+    return _fetch_breadth_naver(market)
+
+
+def _fetch_breadth_naver(market: str) -> dict:
+    """네이버 지수 페이지에서 상승/하락/보합 종목 수 파싱.
+    URL: finance.naver.com/sise/sise_index.naver?code=KOSPI|KOSDAQ"""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return {"ok": False, "err": "beautifulsoup4 미설치"}
+
+    url = f"https://finance.naver.com/sise/sise_index.naver?code={market}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, timeout=10, headers=headers)
+        r.raise_for_status()
+        r.encoding = "euc-kr"
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # 페이지에 "상승 XXX 종목" "하락 XXX 종목" 형식으로 표기됨
+        # 여러 위치 시도
+        import re
+        text = soup.get_text()
+        # 예: "상승", "하락", "보합", "상한", "하한" 뒤 숫자
+        def grab(label, txt):
+            m = re.search(rf"{label}\s*([0-9,]+)", txt)
+            return int(m.group(1).replace(",", "")) if m else None
+
+        up = grab("상승", text); down = grab("하락", text); flat = grab("보합", text)
+        upper = grab("상한", text); lower = grab("하한", text)
+
+        if up is None and down is None:
+            return {"ok": False, "err": "네이버 페이지 파싱 실패"}
+
+        up = up or 0; down = down or 0; flat = flat or 0
+        total = up + down + flat
+        return {"ok": True, "market": market, "total": total,
+                "up": up, "down": down, "flat": flat,
+                "upper_limit": upper or 0, "lower_limit": lower or 0,
+                "up_ratio": round(up / total * 100, 1) if total else 0,
+                "source": "naver_crawl"}
+    except Exception as e:
+        return {"ok": False, "err": f"네이버 크롤링 실패: {e}"}
+
+
+def fetch_market_investor_flow(symbol: str) -> dict:
+    """당일 시장 투자자별 매매(외인/기관/개인) 순매수 거래대금.
+    1) pykrx로 시도 (장 마감 후 확정치)
+    2) 실패 or 장중이면 네이버 크롤링으로 폴백 (장중 실시간)"""
+    market = _MARKET_MAP.get(symbol)
+    if not market:
+        return {"ok": False, "err": "지수 코드 아님"}
+
+    # 1) pykrx 시도 (마감 후 확정치)
+    try:
+        from pykrx import stock
+        today = dt.date.today().strftime("%Y%m%d")
+        df = stock.get_market_trading_value_by_investor(today, today, market=market)
+        if df is None or len(df) == 0:
+            yday = (dt.date.today() - dt.timedelta(days=1)).strftime("%Y%m%d")
+            df = stock.get_market_trading_value_by_investor(yday, yday, market=market)
+        if df is not None and len(df) > 0:
+            col = "순매수" if "순매수" in df.columns else df.columns[-1]
+
+            def val(idx):
+                try:
+                    return int(df.loc[idx, col])
+                except Exception:
+                    return 0
+
+            idx_map = {i: str(i) for i in df.index}
+            def find(*keys):
+                for i, name in idx_map.items():
+                    if any(k in name for k in keys):
+                        return val(i)
+                return 0
+
+            foreign = find("외국인")
+            inst = find("기관합계", "기관")
+            indiv = find("개인")
+            if any([foreign, inst, indiv]):
+                return {"ok": True, "market": market,
+                        "foreign": foreign, "inst": inst, "indiv": indiv,
+                        "source": "pykrx"}
+    except Exception as e:
+        pass  # 네이버 폴백으로
+
+    # 2) 네이버 크롤링 폴백 (장중 실시간)
+    return _fetch_investor_flow_naver(market)
+
+
+def _fetch_investor_flow_naver(market: str) -> dict:
+    """네이버 금융에서 장중 실시간 투자자별 매매 크롤링.
+    URL: finance.naver.com/sise/investorDealTrendDay.naver?bizdate=YYYYMMDD&sosok=01|10
+
+    Note: 네이버는 코스피(01)/코스닥(10) 구분. 여기서는 KOSPI/KOSDAQ 별로 조회."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return {"ok": False, "err": "beautifulsoup4 미설치"}
+
+    sosok = "01" if market == "KOSPI" else "10"
+    today = dt.date.today().strftime("%Y%m%d")
+    url = (f"https://finance.naver.com/sise/investorDealTrendDay.naver"
+           f"?bizdate={today}&sosok={sosok}")
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"}
+
+    try:
+        r = requests.get(url, timeout=10, headers=headers)
+        r.raise_for_status()
+        r.encoding = "euc-kr"  # 네이버 금융 인코딩
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # 텍스트 앵커링: "외국인", "기관계", "개인" 라벨 찾기
+        # 첫 행(당일)의 순매수 값을 추출
+        target_labels = {"외국인": "foreign", "기관계": "inst",
+                         "기관합계": "inst", "개인": "indiv"}
+        result = {"foreign": 0, "inst": 0, "indiv": 0}
+
+        # 표 순회하며 헤더 매칭
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if len(rows) < 2:
+                continue
+            # 헤더에서 컬럼 위치 찾기
+            headers_txt = [th.get_text(strip=True) for th in rows[0].find_all(["th", "td"])]
+            col_idx = {}
+            for i, h in enumerate(headers_txt):
+                for label, key in target_labels.items():
+                    if label in h:
+                        col_idx[key] = i
+                        break
+            if not col_idx:
+                continue
+            # 첫 데이터 행(당일 값) 파싱
+            for row in rows[1:2]:  # 첫 행만
+                cells = [td.get_text(strip=True) for td in row.find_all("td")]
+                for key, i in col_idx.items():
+                    if i < len(cells):
+                        # 예: "1,234", "-567", "1,234억"
+                        txt = cells[i].replace(",", "").replace("억", "")
+                        try:
+                            # 네이버 표기는 백만원 단위 or 원 단위 - 실제 페이지 확인 필요
+                            # 일단 억원 단위로 가정하고 억→원 변환
+                            v = int(float(txt))
+                            # 100만 원 단위로 오는 경우가 많음 → 원 단위로 변환
+                            result[key] = v * 1_000_000
+                        except (ValueError, TypeError):
+                            pass
+            break  # 첫 매칭 테이블만 사용
+
+        if any(result.values()):
+            return {"ok": True, "market": market, "source": "naver_crawl", **result}
+        return {"ok": False, "err": "네이버에서 값 파싱 실패"}
+    except Exception as e:
+        return {"ok": False, "err": f"네이버 크롤링 실패: {e}"}
+
+
+# ----------------------------------------------------------------------
 # 1시간봉 (Naver 분봉 -> resample)
 # ----------------------------------------------------------------------
 def fetch_minute_naver(code: str, count: int = 500) -> pd.DataFrame:
