@@ -146,18 +146,116 @@ def fetch_monthly_source(code: str, years: float = 5.0) -> pd.DataFrame:
 
 
 def fetch_index_daily(symbol: str, years: float = 1.0) -> pd.DataFrame:
-    """지수 일봉 수집 (KS11=코스피, KQ11=코스닥). FDR DataReader 사용."""
-    import FinanceDataReader as fdr
-    end = dt.date.today()
-    start = end - dt.timedelta(days=int(years * 365.25))
-    df = fdr.DataReader(symbol, start, end)
-    df = df.rename(columns=str.lower)
-    keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
-    df = df[keep]
-    if "volume" not in df.columns:
-        df["volume"] = 0
-    df.index = pd.to_datetime(df.index)
-    return _drop_stale_tail(df.sort_index(), symbol)
+    """지수 일봉 수집. FDR + pykrx 둘 다 받아 최신인 쪽 선택.
+    추가로 오늘 봉이 아직 없으면 네이버 실시간 시세로 오늘 봉을 append.
+    (KS11=코스피, KQ11=코스닥)"""
+    dfs = []
+    # 1) FDR
+    try:
+        import FinanceDataReader as fdr
+        end = dt.date.today()
+        start = end - dt.timedelta(days=int(years * 365.25))
+        df = fdr.DataReader(symbol, start, end)
+        df = df.rename(columns=str.lower)
+        keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+        df = df[keep]
+        if "volume" not in df.columns:
+            df["volume"] = 0
+        df.index = pd.to_datetime(df.index)
+        dfs.append(("FDR", _drop_stale_tail(df.sort_index(), symbol)))
+    except Exception as e:
+        print(f"[warn] FDR 지수 실패 {symbol}: {e}")
+
+    # 2) pykrx (지수: KOSPI=1001, KOSDAQ=2001)
+    try:
+        from pykrx import stock
+        krx_code = {"KS11": "1001", "KQ11": "2001"}.get(symbol)
+        if krx_code:
+            end = dt.date.today().strftime("%Y%m%d")
+            start = (dt.date.today() - dt.timedelta(days=int(years * 365.25))).strftime("%Y%m%d")
+            df = stock.get_index_ohlcv_by_date(start, end, krx_code)
+            df = df.rename(columns={"시가": "open", "고가": "high", "저가": "low",
+                                     "종가": "close", "거래량": "volume"})
+            df = df[["open", "high", "low", "close", "volume"]]
+            df.index = pd.to_datetime(df.index)
+            dfs.append(("pykrx", _drop_stale_tail(df.sort_index(), symbol)))
+    except Exception as e:
+        print(f"[warn] pykrx 지수 실패 {symbol}: {e}")
+
+    # 최신 데이터 선택 (마지막 날짜가 더 최근인 쪽)
+    if not dfs:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    dfs.sort(key=lambda x: x[1].index[-1] if len(x[1]) else pd.Timestamp("1900-01-01"),
+             reverse=True)
+    chosen_src, chosen = dfs[0]
+
+    # 3) 네이버 실시간 폴백: 마지막 날짜가 오늘이 아니면 오늘 시세 append
+    today = dt.date.today()
+    last_date = chosen.index[-1].date() if len(chosen) else None
+    if last_date != today:
+        realtime = _fetch_index_realtime_naver(symbol)
+        if realtime:
+            print(f"[info] {symbol} 오늘 봉 누락({last_date}) → 네이버 실시간으로 보정: {realtime['close']}")
+            new_row = pd.DataFrame([{
+                "open": realtime.get("open", realtime["close"]),
+                "high": realtime.get("high", realtime["close"]),
+                "low": realtime.get("low", realtime["close"]),
+                "close": realtime["close"],
+                "volume": realtime.get("volume", 0),
+            }], index=[pd.Timestamp(today)])
+            chosen = pd.concat([chosen, new_row])
+    else:
+        # 오늘 봉이 있어도 장중이면 아직 종가 확정 전 → 네이버로 최신값 갱신
+        realtime = _fetch_index_realtime_naver(symbol)
+        if realtime and abs(chosen["close"].iloc[-1] - realtime["close"]) > 1:
+            print(f"[info] {symbol} 오늘 봉 값 갱신: {chosen['close'].iloc[-1]:.2f} → {realtime['close']:.2f}")
+            for k in ["open", "high", "low", "close"]:
+                if k in realtime:
+                    chosen.iat[-1, chosen.columns.get_loc(k)] = realtime[k]
+
+    return chosen
+
+
+def _fetch_index_realtime_naver(symbol: str) -> dict | None:
+    """네이버 실시간 지수 시세.
+    API: polling.finance.naver.com/api/realtime/domestic/index/KOSPI (또는 KOSDAQ)"""
+    market = {"KS11": "KOSPI", "KQ11": "KOSDAQ"}.get(symbol)
+    if not market:
+        return None
+    url = f"https://polling.finance.naver.com/api/realtime/domestic/index/{market}"
+    try:
+        r = requests.get(url, timeout=8,
+                         headers={"User-Agent": "Mozilla/5.0",
+                                  "Referer": "https://finance.naver.com/"})
+        r.raise_for_status()
+        j = r.json()
+        # 응답 스키마: {"datas":[{"closePrice":"6258.12","openPrice":...,"highPrice":...,"lowPrice":...}]}
+        d = (j.get("datas") or [None])[0]
+        if not d:
+            return None
+
+        def num(v):
+            if v is None:
+                return None
+            s = str(v).replace(",", "")
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        close = num(d.get("closePrice") or d.get("currentPrice"))
+        if close is None:
+            return None
+        return {
+            "close": close,
+            "open": num(d.get("openPrice")),
+            "high": num(d.get("highPrice")),
+            "low": num(d.get("lowPrice")),
+            "volume": num(d.get("accumulatedTradingVolume")) or 0,
+        }
+    except Exception as e:
+        print(f"[warn] 네이버 실시간 지수 실패 {symbol}: {e}")
+        return None
 
 
 # ----------------------------------------------------------------------
