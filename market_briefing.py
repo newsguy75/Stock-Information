@@ -285,9 +285,13 @@ def fetch_market_investor_summary() -> dict:
 # ======================================================================
 def fetch_top_trading_value(market: str = "kospi", top_n: int = 20) -> dict:
     """거래대금 상위 종목.
-    URL: finance.naver.com/sise/sise_quant.naver?sosok=0 (코스피)
-         finance.naver.com/sise/sise_quant.naver?sosok=1 (코스닥)
-    반환: [{rank, name, price, change_pct, volume, value}]"""
+    URL: finance.naver.com/sise/sise_quant.naver?sosok=0 (거래량 상위)
+    이 페이지는 실제로는 '거래량' 순위임. 표에는 거래량과 거래대금이 함께 나옴.
+    
+    표 컬럼 순서 (2026 기준):
+    [N, 종목명, 현재가, 전일비, 등락률, 거래량, 매수호가, 매도호가, 매수총잔량, 매도총잔량, PER, ROE]
+    거래대금 컬럼은 표에 없음. 거래량(주 단위)을 그대로 사용.
+    """
     try:
         from bs4 import BeautifulSoup
     except ImportError:
@@ -304,13 +308,44 @@ def fetch_top_trading_value(market: str = "kospi", top_n: int = 20) -> dict:
         if not table:
             return {"ok": False, "err": "표 없음"}
 
+        # 헤더에서 컬럼 위치 찾기 (안정적 앵커링)
+        headers_txt = []
+        header_row = table.find("tr")
+        if header_row:
+            headers_txt = [th.get_text(strip=True) for th in header_row.find_all(["th", "td"])]
+
+        # 컬럼 인덱스 매핑
+        idx_name = idx_price = idx_chg = idx_vol = None
+        for i, h in enumerate(headers_txt):
+            if h in ("종목명", "Name"):
+                idx_name = i
+            elif h in ("현재가", "Price"):
+                idx_price = i
+            elif h in ("등락률", "%"):
+                idx_chg = i
+            elif h in ("거래량", "Volume"):
+                idx_vol = i
+
+        # 기본값 폴백 (헤더 파싱 실패 시)
+        if idx_name is None:
+            idx_name = 1
+        if idx_price is None:
+            idx_price = 2
+        if idx_chg is None:
+            idx_chg = 4
+        if idx_vol is None:
+            idx_vol = 5
+
+        print(f"[거래대금 컬럼] 헤더={headers_txt}")
+        print(f"[거래대금 컬럼] name={idx_name}, price={idx_price}, chg={idx_chg}, vol={idx_vol}")
+
         rows = []
         rank = 0
         for tr in table.find_all("tr"):
             tds = tr.find_all("td")
-            if len(tds) < 8:
+            if len(tds) < max(idx_name, idx_price, idx_chg, idx_vol) + 1:
                 continue
-            a = tds[1].find("a") if len(tds) > 1 else None
+            a = tds[idx_name].find("a") if idx_name < len(tds) else None
             if not a:
                 continue
             name = a.get_text(strip=True)
@@ -318,33 +353,44 @@ def fetch_top_trading_value(market: str = "kospi", top_n: int = 20) -> dict:
                 continue
             try:
                 rank += 1
-                price = tds[2].get_text(strip=True).replace(",", "")
-                # 등락률 (tds[4] 근처)
-                chg_pct_txt = tds[4].get_text(strip=True).replace(",", "").replace("%", "")
+                price_txt = tds[idx_price].get_text(strip=True).replace(",", "")
+                chg_pct_txt = tds[idx_chg].get_text(strip=True).replace(",", "").replace("%", "")
+
+                # 부호 확인 (class 기반)
                 if not chg_pct_txt.startswith("-") and not chg_pct_txt.startswith("+"):
-                    # 클래스로 방향 확인
-                    cls = " ".join(tds[4].get("class", []))
-                    if "nv01" in cls or "down" in cls.lower():
+                    cls = " ".join(tds[idx_chg].get("class", []))
+                    row_cls = " ".join(tr.get("class", []))
+                    all_cls = cls + " " + row_cls
+                    if "nv01" in all_cls or "down" in all_cls.lower() or "blind" in all_cls.lower():
                         chg_pct_txt = "-" + chg_pct_txt
-                    else:
+                    elif chg_pct_txt and chg_pct_txt != "0.00":
                         chg_pct_txt = "+" + chg_pct_txt
-                # 거래대금 (거래대금은 보통 tds[7])
-                value_txt = tds[7].get_text(strip=True).replace(",", "")
-                # 거래량 (tds[5])
-                volume_txt = tds[5].get_text(strip=True).replace(",", "")
+
+                vol_txt = tds[idx_vol].get_text(strip=True).replace(",", "")
+
+                price = int(price_txt) if price_txt.isdigit() else 0
+                volume = int(vol_txt) if vol_txt.isdigit() else 0
+                # 거래대금 (원 단위) = 거래량 × 현재가
+                value_won = volume * price
 
                 rows.append({
                     "rank": rank,
                     "name": name,
-                    "price": int(price) if price.isdigit() else 0,
+                    "price": price,
                     "change_pct": float(chg_pct_txt) if chg_pct_txt else 0,
-                    "volume": int(volume_txt) if volume_txt.isdigit() else 0,
-                    "value": int(value_txt) if value_txt.isdigit() else 0,  # 백만원 단위
+                    "volume": volume,
+                    "value": value_won // 1_000_000,  # 백만원 단위
                 })
                 if len(rows) >= top_n:
                     break
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as e:
+                print(f"[warn] {market} 거래대금 파싱 실패 rank={rank}: {e}")
                 continue
+
+        # 실제 거래대금(volume × price) 기준으로 재정렬
+        rows.sort(key=lambda x: x["value"], reverse=True)
+        for i, row in enumerate(rows, 1):
+            row["rank"] = i
 
         return {"ok": True, "market": market.upper(), "items": rows[:top_n]}
     except Exception as e:
