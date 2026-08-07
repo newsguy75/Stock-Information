@@ -131,15 +131,22 @@ def _stoch_verdict(out: dict) -> dict:
 # 2-B. 하락 경고 신호 (하락다이버전스 / 데드캣바운스 / 쌍봉) — 최우선 강조
 # ======================================================================
 def detect_double_top(daily: pd.DataFrame, lookback: int = 60,
-                       tol_pct: float = 3.0) -> dict:
+                       tol_pct: float = 3.0, max_age: int = 5,
+                       near_neckline_pct: float = 3.0) -> dict:
     """쌍봉(더블탑): 최근 구간에서 비슷한 높이의 고점 2개 + 사이 골 + 현재 하락.
-    두 고점 차이가 tol_pct 이내이고, 두 번째 고점 이후 하락 중이면 쌍봉."""
+    두 고점 차이가 tol_pct 이내이고, 두 번째 고점 이후 하락 중이면 쌍봉.
+
+    유효성 필터:
+    - 두번째 고점(peak2)이 최근 max_age 봉 이내여야 유효한 신호
+      (오래된 쌍봉은 이미 소진된 신호)
+    - "근접" 판정은 현재가가 넥라인의 near_neckline_pct% 이내일 때만
+      (예: 3% 이내). 그 이상 떨어져있으면 "관찰" 로 톤다운.
+    """
     df = daily.tail(lookback)
     if len(df) < 20:
         return {"found": False}
     high = df["high"].values
     close = df["close"]
-    # 피벗 고점 찾기 (order=3)
     piv = []
     for i in range(3, len(high) - 3):
         if high[i] == max(high[i-3:i+4]):
@@ -147,30 +154,58 @@ def detect_double_top(daily: pd.DataFrame, lookback: int = 60,
     if len(piv) < 2:
         return {"found": False}
     i1, i2 = piv[-2], piv[-1]
+    n = len(df)
+
+    # 유효기간: 두번째 고점이 최근 max_age 봉 이내
+    if (n - 1 - i2) > max_age:
+        return {"found": False, "reason": f"peak2 {n-1-i2}봉 전 - 오래됨"}
+
     h1, h2 = high[i1], high[i2]
-    # 두 고점 높이 유사 + 사이에 골 존재 + 현재가 두번째 고점보다 아래
-    if abs(h1 - h2) / max(h1, h2) * 100 <= tol_pct:
-        valley = min(high[i1:i2]) if i2 > i1 else h1
-        neckline = float(df["low"].iloc[i1:i2+1].min())
-        cur = float(close.iloc[-1])
-        if cur < h2 and (h2 - valley) / h2 * 100 > 2:
-            broke = cur < neckline
-            return {"found": True,
-                    "peak1_date": str(df.index[i1].date()),
-                    "peak2_date": str(df.index[i2].date()),
-                    "peak_level": round((h1 + h2) / 2),
-                    "neckline": round(neckline),
-                    "broke_neckline": broke,
-                    "desc": (f"쌍봉 고점 {h1:,.0f}/{h2:,.0f} · 넥라인 {neckline:,.0f}"
-                             + (" 이탈(하락 확정 신호)" if broke else " 근접(이탈 시 하락 가속)"))}
-    return {"found": False}
+    if abs(h1 - h2) / max(h1, h2) * 100 > tol_pct:
+        return {"found": False}
+
+    valley = min(high[i1:i2]) if i2 > i1 else h1
+    neckline = float(df["low"].iloc[i1:i2+1].min())
+    cur = float(close.iloc[-1])
+    cur_date = str(df.index[-1].date())
+
+    if not (cur < h2 and (h2 - valley) / h2 * 100 > 2):
+        return {"found": False}
+
+    # 넥라인과의 거리 %
+    dist_pct = (cur - neckline) / neckline * 100
+
+    if cur < neckline:
+        status = "이탈"
+        desc_tail = f"넥라인 이탈 ({cur - neckline:+,.0f}원, {dist_pct:+.1f}%) → 하락 확정"
+    elif dist_pct <= near_neckline_pct:
+        status = "근접"
+        desc_tail = f"넥라인 {near_neckline_pct}% 이내 근접({dist_pct:+.1f}%) → 이탈 시 하락 가속"
+    else:
+        status = "관찰"
+        desc_tail = f"넥라인까지 {dist_pct:+.1f}% 여유 → 지지 확인 필요"
+
+    p1_date = str(df.index[i1].date())
+    p2_date = str(df.index[i2].date())
+    return {"found": True,
+            "peak1_date": p1_date, "peak2_date": p2_date,
+            "peak_level": round((h1 + h2) / 2),
+            "neckline": round(neckline),
+            "broke_neckline": cur < neckline,
+            "status": status,
+            "dist_pct": round(dist_pct, 1),
+            "cur_date": cur_date,
+            "desc": (f"쌍봉[{p1_date}·{p2_date}] 고점 {h1:,.0f}/{h2:,.0f} · "
+                     f"넥라인 {neckline:,.0f} · 현재 {cur:,.0f}({cur_date}) — {desc_tail}")}
 
 
-def detect_dead_cat_bounce(daily: pd.DataFrame, stoch_daily: dict = None) -> dict:
+def detect_dead_cat_bounce(daily: pd.DataFrame, stoch_daily: dict = None,
+                            max_age: int = 5) -> dict:
     """데드캣바운스: 급락 후 단기 반등이나 추세 회복 실패 징후.
     - 최근 20일 내 큰 낙폭(고점 대비 -15%↑)
     - 직후 소폭 반등(저점 대비 반등)
-    - 그러나 20일선 아래 + 반등 거래량 미약 → 진성 반등 아닐 가능성."""
+    - 그러나 20일선 아래 + 반등 거래량 미약 → 진성 반등 아닐 가능성.
+    - 반등 시작 시점이 max_age 봉 이내여야 유효 (오래된 반등은 이미 소진)"""
     df = daily.tail(30)
     if len(df) < 20:
         return {"found": False}
@@ -180,14 +215,22 @@ def detect_dead_cat_bounce(daily: pd.DataFrame, stoch_daily: dict = None) -> dic
     recent_low = close.iloc[-20:].min()
     cur = float(close.iloc[-1])
     low_idx = close.iloc[-20:].idxmin()
+    low_date = str(pd.Timestamp(low_idx).date())
+    cur_date = str(df.index[-1].date())
+
+    # 저점 이후 경과 봉 수 (반등 진행 기간)
+    low_pos = df.index.get_loc(low_idx)
+    bounce_bars = len(df) - 1 - low_pos
 
     drop_pct = (recent_high - recent_low) / recent_high * 100
     bounce_pct = (cur - recent_low) / recent_low * 100 if recent_low else 0
     below_ma20 = pd.notna(ma20.iloc[-1]) and cur < ma20.iloc[-1]
 
-    # 급락(-15%↑) + 소폭 반등(3~15%) + 20일선 아래 = 데드캣바운스 의심
+    # 유효기간: 반등이 max_age 봉 이내(너무 오래되면 이미 신호 소진)
+    if bounce_bars > max_age * 3:  # 반등이 15봉 넘게 지났으면 무효
+        return {"found": False}
+
     if drop_pct >= 15 and 3 <= bounce_pct <= 15 and below_ma20:
-        # 반등 거래량 확인 (반등 구간 거래량이 하락 구간보다 약하면 신뢰↓)
         weak_vol = ""
         try:
             vol = df["volume"]
@@ -199,16 +242,22 @@ def detect_dead_cat_bounce(daily: pd.DataFrame, stoch_daily: dict = None) -> dic
             pass
         return {"found": True,
                 "drop_pct": round(drop_pct, 1), "bounce_pct": round(bounce_pct, 1),
-                "desc": (f"급락 -{drop_pct:.0f}% 후 +{bounce_pct:.0f}% 반등이나 "
-                         f"20일선 하회{weak_vol} → 데드캣바운스 경계")}
+                "low_date": low_date,
+                "cur_date": cur_date,
+                "bounce_bars": bounce_bars,
+                "desc": (f"저점[{low_date}] {recent_low:,.0f}원 대비 "
+                         f"현재[{cur_date}] +{bounce_pct:.0f}% 반등이나 "
+                         f"고점 대비 -{drop_pct:.0f}% + 20일선 하회{weak_vol} → 데드캣바운스 경계")}
     return {"found": False}
 
 
 def build_bear_warnings(daily: pd.DataFrame, div: dict, stoch_daily: dict) -> dict:
-    """일봉 기준 하락 경고를 모아 최우선 강조용으로 반환."""
+    """일봉 기준 하락 경고를 모아 최우선 강조용으로 반환.
+    최근 5봉 이내 유효한 신호만 포함."""
     warnings = []
 
     # 1) 일봉 하락다이버전스 (최우선)
+    #    이미 detect_divergence에서 max_age=15 필터로 최근 것만 잡힘
     dd = div.get("일봉", {})
     if dd.get("found") and dd.get("type") == "하락":
         warnings.append({
@@ -218,15 +267,19 @@ def build_bear_warnings(daily: pd.DataFrame, div: dict, stoch_daily: dict) -> di
             "desc": f"일봉 하락다이버전스 [{dd.get('to_date','')}] — {dd.get('basis','')}"
         })
 
-    # 2) 쌍봉
+    # 2) 쌍봉 (최근 5봉 이내 + 넥라인 근접/이탈만)
     dt_ = detect_double_top(daily)
     if dt_.get("found"):
-        warnings.append({
-            "kind": "쌍봉(더블탑)",
-            "level": "높음" if dt_.get("broke_neckline") else "주의",
-            "date": dt_.get("peak2_date", ""),
-            "desc": dt_["desc"]
-        })
+        status = dt_.get("status", "관찰")
+        # "관찰" 상태는 실질적 위험 아님 → 경고에서 제외
+        if status in ("이탈", "근접"):
+            level = "높음" if status == "이탈" else "주의"
+            warnings.append({
+                "kind": "쌍봉(더블탑)",
+                "level": level,
+                "date": dt_.get("peak2_date", ""),
+                "desc": dt_["desc"]
+            })
 
     # 3) 데드캣바운스
     dcb = detect_dead_cat_bounce(daily, stoch_daily)
@@ -234,19 +287,20 @@ def build_bear_warnings(daily: pd.DataFrame, div: dict, stoch_daily: dict) -> di
         warnings.append({
             "kind": "데드캣바운스",
             "level": "주의",
-            "date": "",
+            "date": dcb.get("low_date", ""),
             "desc": dcb["desc"]
         })
 
-    # 4) 일봉 단기 스토캐 과매수권 하락전환 (보조 경고)
+    # 4) 일봉 단기 스토캐 과매수권 하락전환 (보조 경고) - 이건 실시간 신호라 항상 유효
     if stoch_daily:
         ds = stoch_daily.get("단기", {})
         if ds.get("ok") and ds.get("zone") == "과매수" and ds.get("direction") == "하락":
+            last_bar = ds.get("last_bar", "")
             warnings.append({
                 "kind": "과매수 하락전환",
                 "level": "주의",
-                "date": "",
-                "desc": f"일봉 단기 스토캐 과매수권 하락전환(K{ds.get('k')})"
+                "date": last_bar,
+                "desc": f"일봉 단기 스토캐[{last_bar}] 과매수권 하락전환(K{ds.get('k')})"
             })
 
     return {"has_warning": len(warnings) > 0, "warnings": warnings}

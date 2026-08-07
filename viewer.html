@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>포트폴리오 리포트 뷰어</title>
 <style>
   :root {
@@ -174,12 +177,13 @@ function select(i){
   const frame = document.getElementById("frame");
   const ph = document.getElementById("placeholder");
   ph.style.display = "none";
-  frame.src = fileFor(it) + "?t=" + Date.now();
+  // 캐시 완전 무효화: 매번 다른 쿼리스트링
+  const bust = Date.now() + "_" + Math.random().toString(36).slice(2,8);
+  frame.src = fileFor(it) + "?v=" + bust;
   frame.onerror = () => {
     ph.style.display = "flex";
     ph.innerHTML = `<div class="err">리포트를 불러올 수 없습니다.<br><code>${fileFor(it)}</code><br>파일이 아직 생성되지 않았을 수 있습니다.</div>`;
   };
-  // 모바일에서 선택 후 사이드바 닫기
   if (window.innerWidth <= 640) document.getElementById("sidebar").classList.add("hidden");
 }
 
@@ -190,7 +194,62 @@ function onPick(){
 function reload(){ loadManifest().then(()=>{ if(current!==null) select(current); }); }
 function toggleSidebar(){ document.getElementById("sidebar").classList.toggle("hidden"); }
 
-loadManifest();
+// ===== 자동 새로고침 =====
+let lastUpdated = null;
+
+async function checkForUpdates(silent=false){
+  try {
+    const r = await fetch(MANIFEST + "?t=" + Date.now(), {cache:"no-store"});
+    if (!r.ok) return;
+    const j = await r.json();
+    const updated = j.updated;
+    if (lastUpdated && updated && updated !== lastUpdated) {
+      // 새 데이터 감지 → 자동 리로드
+      console.log("새 데이터 감지:", lastUpdated, "→", updated);
+      items = j.items || [];
+      lastUpdated = updated;
+      document.getElementById("updated").textContent = "· 갱신 " + updated;
+      render();
+      if (current !== null) select(current);   // 현재 보던 종목 리포트도 갱신
+      if (!silent) showUpdateToast();
+    } else if (!lastUpdated) {
+      lastUpdated = updated;
+    }
+  } catch(e) { /* 조용히 무시 */ }
+}
+
+function showUpdateToast(){
+  const t = document.createElement("div");
+  t.textContent = "↻ 최신 데이터로 갱신됨";
+  t.style.cssText = "position:fixed;top:20px;right:20px;background:var(--accent);color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,.3);opacity:0;transition:opacity .3s";
+  document.body.appendChild(t);
+  requestAnimationFrame(()=>t.style.opacity="1");
+  setTimeout(()=>{ t.style.opacity="0"; setTimeout(()=>t.remove(),300); }, 2500);
+}
+
+// 초기 로드
+loadManifest().then(async()=>{
+  // manifest 로드 후 lastUpdated 초기화
+  try {
+    const r = await fetch(MANIFEST + "?t=" + Date.now(), {cache:"no-store"});
+    const j = await r.json();
+    lastUpdated = j.updated;
+  } catch(e){}
+});
+
+// 3분마다 자동 확인
+setInterval(()=>checkForUpdates(false), 3 * 60 * 1000);
+
+// 창에 포커스 돌아올 때(다른 탭/앱에서 복귀) 즉시 확인
+window.addEventListener("focus", ()=>checkForUpdates(false));
+document.addEventListener("visibilitychange", ()=>{
+  if (!document.hidden) checkForUpdates(false);
+});
+
+// 브라우저 뒤로가기/앞으로가기로 복원 시 새로고침 (bfcache 대응)
+window.addEventListener("pageshow", (e)=>{
+  if (e.persisted) location.reload();
+});
 </script>
 </body>
 </html>
