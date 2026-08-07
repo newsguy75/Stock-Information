@@ -578,23 +578,35 @@ def analyze_supply_demand(code: str, demo: bool = False) -> dict:
         from pykrx import stock
         end = dt.date.today()
         e = end.strftime("%Y%m%d")
-        s5 = (end - dt.timedelta(days=9)).strftime("%Y%m%d")
-        s20 = (end - dt.timedelta(days=32)).strftime("%Y%m%d")
-        s60 = (end - dt.timedelta(days=90)).strftime("%Y%m%d")
+        # 넉넉히 90일 조회 후 최근 N 거래일만 slice (실제 거래일 기준 정확히 자르기)
+        s90 = (end - dt.timedelta(days=90)).strftime("%Y%m%d")
+        df_full = stock.get_market_trading_value_by_date(s90, e, code)
+        if df_full is None or len(df_full) == 0:
+            return {"ok": False, "err": "pykrx 반환 없음"}
+        df_full = df_full.sort_index()
 
         def net(df_):
-            cols = df_.columns
-            fo = df_["외국인합계"].sum() if "외국인합계" in cols else (df_["외국인"].sum() if "외국인" in cols else np.nan)
-            ins = df_["기관합계"].sum() if "기관합계" in cols else np.nan
-            ind = df_["개인"].sum() if "개인" in cols else np.nan
+            """실제 컬럼명 방어적 매칭. pykrx가 반환하는 컬럼:
+            개인, 외국인, 기관합계, 기타법인, 전체 (또는 세분화된 기관 그룹)"""
+            cols = list(df_.columns)
+            fo_col = next((c for c in cols if "외국인합계" in c or c == "외국인"), None)
+            ins_col = next((c for c in cols if "기관합계" in c), None)
+            ind_col = next((c for c in cols if c == "개인"), None)
+            fo = df_[fo_col].sum() if fo_col else 0.0
+            ins = df_[ins_col].sum() if ins_col else 0.0
+            ind = df_[ind_col].sum() if ind_col else 0.0
             return float(fo), float(ins), float(ind)
 
-        df5 = stock.get_market_trading_value_by_date(s5, e, code)
-        df20 = stock.get_market_trading_value_by_date(s20, e, code)
-        df60 = stock.get_market_trading_value_by_date(s60, e, code)
+        # 최근 N 거래일 정확히 slice (달력일이 아닌 실제 거래일 기준)
+        df5 = df_full.tail(5)
+        df20 = df_full.tail(20)
+        df60 = df_full.tail(60)
         f5, i5, p5 = net(df5)
         f20, i20, p20 = net(df20)
         f60, i60, p60 = net(df60)
+
+        # 실제 잡힌 거래일 수 표시 (디버깅용, 20일 미만이면 데이터 부족 안내)
+        n5, n20, n60 = len(df5), len(df20), len(df60)
 
         # 20일 기준 매매비중 (절대값 기준 점유율)
         total20 = abs(f20) + abs(i20) + abs(p20)
