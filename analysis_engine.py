@@ -47,14 +47,30 @@ def _stoch_dir(df: pd.DataFrame, k_period: int, k_smooth: int, d_period: int) ->
         last_bar_date = str(pd.Timestamp(df.index[-1]).date())
     except Exception:
         last_bar_date = ""
-    # 방향: 상승/하락/보합 (%K 기울기 + %K vs %D)
+
+    # 방향 판정: %K 기울기 + %K vs %D 관계 종합
+    #   - slope: %K가 얼마나 움직였는지 (임계값 3.0포인트 - 노이즈 필터)
+    #   - k_vs_d: 위/아래 관계 (K > D 면 상승 기조, K < D 면 하락 기조)
     slope = k_now - k_prev
-    if slope > 1.5:
+    k_above_d = pd.notna(d_now) and k_now > d_now
+
+    # 방향은 slope과 k_vs_d 둘 다 고려. 하나만 신호면 "보합" 처리.
+    if slope > 3.0 and k_above_d:
         direction = "상승"
-    elif slope < -1.5:
+    elif slope < -3.0 and not k_above_d:
         direction = "하락"
+    elif abs(slope) <= 3.0:
+        # 완만한 움직임: %K와 %D 관계로만 판단
+        if k_above_d and slope > 0:
+            direction = "상승"
+        elif not k_above_d and slope < 0:
+            direction = "하락"
+        else:
+            direction = "보합"
     else:
+        # 강한 slope이지만 K/D 관계와 반대 → 전환 초기, 보합 처리 (오판 방지)
         direction = "보합"
+
     zone = "과매수" if k_now >= 80 else ("과매도" if k_now <= 20 else "중립")
     cross = None
     if len(k) >= 2 and len(d) >= 2:
@@ -291,17 +307,29 @@ def build_bear_warnings(daily: pd.DataFrame, div: dict, stoch_daily: dict) -> di
             "desc": dcb["desc"]
         })
 
-    # 4) 일봉 단기 스토캐 과매수권 하락전환 (보조 경고) - 이건 실시간 신호라 항상 유효
+    # 4) 일봉 단기 스토캐 과매수권 하락전환 (보조 경고)
+    #    실제 하락전환 확인: 과매수(K≥80) + 방향 하락 + (데드크로스 or K가 D 아래)
+    #    단순 slope으로만 판정하면 노이즈로 오탐지가 자주 발생
     if stoch_daily:
         ds = stoch_daily.get("단기", {})
-        if ds.get("ok") and ds.get("zone") == "과매수" and ds.get("direction") == "하락":
-            last_bar = ds.get("last_bar", "")
-            warnings.append({
-                "kind": "과매수 하락전환",
-                "level": "주의",
-                "date": last_bar,
-                "desc": f"일봉 단기 스토캐[{last_bar}] 과매수권 하락전환(K{ds.get('k')})"
-            })
+        if (ds.get("ok") and ds.get("zone") == "과매수"
+                and ds.get("direction") == "하락"):
+            # 추가 확인: 데드크로스 발생했거나 K가 D 아래로 명확히 내려간 경우만
+            cross = ds.get("cross", "")
+            k_val = ds.get("k", 0)
+            d_val = ds.get("d", 0)
+            k_below_d = k_val < d_val
+            if cross == "데드크로스" or (k_below_d and (d_val - k_val) >= 2):
+                last_bar = ds.get("last_bar", "")
+                warnings.append({
+                    "kind": "과매수 하락전환",
+                    "level": "주의",
+                    "date": last_bar,
+                    "desc": (f"일봉 단기 스토캐[{last_bar}] 과매수권 하락전환"
+                             f"(K{k_val}/D{d_val}"
+                             + (f", 데드크로스)" if cross == "데드크로스"
+                                else ", K<D)"))
+                })
 
     return {"has_warning": len(warnings) > 0, "warnings": warnings}
 
