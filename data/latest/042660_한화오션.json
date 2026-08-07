@@ -1,0 +1,246 @@
+{
+  "name": "한화오션",
+  "code": "042660",
+  "price": 89400,
+  "is_index": false,
+  "change_pct": -1.43,
+  "timestamp": "2026-08-07T07:13:26.756797+00:00",
+  "data_freshness": {
+    "daily": "2026-08-07",
+    "weekly": "2026-08-07",
+    "monthly": "2026-08-31",
+    "hourly": ""
+  },
+  "bear_warnings": {
+    "has_warning": true,
+    "warnings": [
+      {
+        "kind": "과매수 하락전환",
+        "level": "주의",
+        "date": "2026-08-07",
+        "desc": "일봉 단기 스토캐[2026-08-07] 과매수권 하락전환(K85.1)"
+      }
+    ]
+  },
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": false
+    },
+    "월봉": {
+      "ok": true,
+      "found": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "단기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "장기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "단기": {
+        "ok": true,
+        "k": 85.1,
+        "d": 91.2,
+        "direction": "하락",
+        "zone": "과매수",
+        "cross": "데드크로스",
+        "last_bar": "2026-08-07"
+      },
+      "중기": {
+        "ok": true,
+        "k": 82.4,
+        "d": 65.4,
+        "direction": "상승",
+        "zone": "과매수",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      },
+      "장기": {
+        "ok": true,
+        "k": 46.3,
+        "d": 27.0,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      }
+    },
+    "monthly": {
+      "단기": {
+        "ok": true,
+        "k": 16.8,
+        "d": 22.9,
+        "direction": "하락",
+        "zone": "과매도",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      },
+      "중기": {
+        "ok": true,
+        "k": 32.5,
+        "d": 53.4,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      },
+      "장기": {
+        "ok": true,
+        "k": 69.3,
+        "d": 79.8,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기상승·중기상승·단기하락",
+        "월봉 단기 하락"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 89400,
+    "ma5": 88500,
+    "ma20": 84190,
+    "ma60": 103208,
+    "position": "5일선 위 / 20일선 위 / 60일선 아래",
+    "gap_pct": 5.12,
+    "state": "혼조",
+    "forecast": null,
+    "forecast60": null,
+    "note": null,
+    "ma5_forecast": {
+      "ok": true,
+      "direction": "상승",
+      "slope_pct": 2.43,
+      "now": 88500,
+      "proj": {
+        "1일후": 90650,
+        "2일후": 92800,
+        "3일후": 94950
+      }
+    },
+    "ma20_forecast": {
+      "ok": true,
+      "direction": "보합",
+      "slope_pct": -0.02,
+      "now": 84190,
+      "proj": {
+        "1일후": 84174,
+        "2일후": 84158,
+        "3일후": 84142
+      }
+    }
+  },
+  "pullback": {
+    "ok": true,
+    "has_signal": true,
+    "signals": [
+      {
+        "line": "5일선",
+        "level": 88500,
+        "stop": 86730,
+        "type": "1차 눌림목(단기)",
+        "desc": "종가 5일선(88,500) 위 + 저가가 5일선 지지터치 → 단기 눌림목 매수 관점"
+      }
+    ],
+    "confidence": "중",
+    "opinion": "거래량 축소 동반(건전한 눌림 패턴) / 일봉 단기 스토캐 과매수(K85.1) → 추가 눌림 여지",
+    "price": 89400
+  },
+  "supply_demand": {
+    "ok": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "summary": "수급 데이터 조회 실패(KRX 로그인/차단 확인 필요)"
+  },
+  "shorting": {
+    "ok": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "summary": "공매도 데이터 조회 실패(KRX 로그인/차단 확인 필요)"
+  },
+  "daily_verdict": {
+    "score": 0,
+    "verdict": "보합 예상",
+    "reasons": [
+      "단기 스토캐 하락(K85.1)",
+      "5일선 지지터치(1차 눌림목(단기))"
+    ],
+    "breakdown": [
+      {
+        "item": "일봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "일봉 단기 스토캐",
+        "pts": -1,
+        "note": "단기 스토캐 하락(K85.1)"
+      },
+      {
+        "item": "이평 배열",
+        "pts": 0,
+        "note": "혼조"
+      },
+      {
+        "item": "눌림목 매수신호",
+        "pts": 1,
+        "note": "5일선 지지터치(1차 눌림목(단기))"
+      }
+    ],
+    "strong_bear": false
+  },
+  "monthly_verdict": {
+    "score": -2,
+    "verdict": "월봉 약세 조정",
+    "reasons": [
+      "장기 하락(K69.3)",
+      "중기 하락(K32.5)",
+      "단기 하락(K16.8)",
+      "월 5>20 (중장기 정배열)"
+    ],
+    "breakdown": [
+      {
+        "item": "월봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "월봉 장기 스토캐",
+        "pts": -1,
+        "note": "장기 하락(K69.3)"
+      },
+      {
+        "item": "월봉 중기 스토캐",
+        "pts": -1,
+        "note": "중기 하락(K32.5)"
+      },
+      {
+        "item": "월봉 단기 스토캐",
+        "pts": -1,
+        "note": "단기 하락(K16.8)"
+      },
+      {
+        "item": "월봉 MA 배열",
+        "pts": 1,
+        "note": "월 5>20 (중장기 정배열)"
+      }
+    ],
+    "n_months": 61,
+    "note": "월봉 판단 근거: 확보 61개월(약 5년) — 장기 지표 포함 판단"
+  }
+}

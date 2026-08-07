@@ -1,0 +1,234 @@
+{
+  "name": "GS건설",
+  "code": "006360",
+  "price": 31650,
+  "is_index": false,
+  "change_pct": -2.91,
+  "timestamp": "2026-08-07T07:11:02.724629+00:00",
+  "data_freshness": {
+    "daily": "2026-08-07",
+    "weekly": "2026-08-07",
+    "monthly": "2026-08-31",
+    "hourly": ""
+  },
+  "bear_warnings": {
+    "has_warning": true,
+    "warnings": [
+      {
+        "kind": "과매수 하락전환",
+        "level": "주의",
+        "date": "2026-08-07",
+        "desc": "일봉 단기 스토캐[2026-08-07] 과매수권 하락전환(K85.5)"
+      }
+    ]
+  },
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": false
+    },
+    "월봉": {
+      "ok": true,
+      "found": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "단기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "장기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "단기": {
+        "ok": true,
+        "k": 85.5,
+        "d": 84.5,
+        "direction": "하락",
+        "zone": "과매수",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      },
+      "중기": {
+        "ok": true,
+        "k": 63.3,
+        "d": 36.4,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      },
+      "장기": {
+        "ok": true,
+        "k": 38.5,
+        "d": 41.3,
+        "direction": "보합",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      }
+    },
+    "monthly": {
+      "단기": {
+        "ok": true,
+        "k": 29.8,
+        "d": 36.3,
+        "direction": "보합",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      },
+      "중기": {
+        "ok": true,
+        "k": 44.1,
+        "d": 49.5,
+        "direction": "보합",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      },
+      "장기": {
+        "ok": true,
+        "k": 51.5,
+        "d": 52.7,
+        "direction": "보합",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기보합·중기상승·단기하락",
+        "월봉 단기 보합"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 31650,
+    "ma5": 29680,
+    "ma20": 28082,
+    "ma60": 28518,
+    "position": "5일선 위 / 20일선 위 / 60일선 위",
+    "gap_pct": 5.69,
+    "state": "혼조",
+    "forecast": null,
+    "forecast60": "약 4일 뒤 20·60 골든크로스 (중기 추세전환 신호)",
+    "note": null,
+    "ma5_forecast": {
+      "ok": true,
+      "direction": "상승",
+      "slope_pct": 5.44,
+      "now": 29680,
+      "proj": {
+        "1일후": 31296,
+        "2일후": 32912,
+        "3일후": 34528
+      }
+    },
+    "ma20_forecast": {
+      "ok": true,
+      "direction": "상승",
+      "slope_pct": 0.26,
+      "now": 28082,
+      "proj": {
+        "1일후": 28155,
+        "2일후": 28227,
+        "3일후": 28299
+      }
+    }
+  },
+  "pullback": {
+    "ok": true,
+    "has_signal": false,
+    "status": "이평선 위 안착 — 눌림(터치) 대기 구간",
+    "confidence": "중",
+    "opinion": "거래량 축소 동반(건전한 눌림 패턴) / 일봉 단기 스토캐 과매수(K85.5) → 추가 눌림 여지",
+    "price": 31650
+  },
+  "supply_demand": {
+    "ok": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "summary": "수급 데이터 조회 실패(KRX 로그인/차단 확인 필요)"
+  },
+  "shorting": {
+    "ok": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "summary": "공매도 데이터 조회 실패(KRX 로그인/차단 확인 필요)"
+  },
+  "daily_verdict": {
+    "score": -1,
+    "verdict": "약세/조정 주의",
+    "reasons": [
+      "단기 스토캐 하락(K85.5)"
+    ],
+    "breakdown": [
+      {
+        "item": "일봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "일봉 단기 스토캐",
+        "pts": -1,
+        "note": "단기 스토캐 하락(K85.5)"
+      },
+      {
+        "item": "이평 배열",
+        "pts": 0,
+        "note": "혼조"
+      },
+      {
+        "item": "눌림목 매수신호",
+        "pts": 0,
+        "note": "눌림 신호 없음(터치 대기)"
+      }
+    ],
+    "strong_bear": false
+  },
+  "monthly_verdict": {
+    "score": 1,
+    "verdict": "월봉 반등 초입 가능",
+    "reasons": [
+      "월 5>20 (중장기 정배열)"
+    ],
+    "breakdown": [
+      {
+        "item": "월봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "월봉 장기 스토캐",
+        "pts": 0,
+        "note": "장기 보합(K51.5)"
+      },
+      {
+        "item": "월봉 중기 스토캐",
+        "pts": 0,
+        "note": "중기 보합(K44.1)"
+      },
+      {
+        "item": "월봉 단기 스토캐",
+        "pts": 0,
+        "note": "단기 보합(K29.8)"
+      },
+      {
+        "item": "월봉 MA 배열",
+        "pts": 1,
+        "note": "월 5>20 (중장기 정배열)"
+      }
+    ],
+    "n_months": 61,
+    "note": "월봉 판단 근거: 확보 61개월(약 5년) — 장기 지표 포함 판단"
+  }
+}

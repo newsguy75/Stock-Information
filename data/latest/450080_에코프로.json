@@ -1,0 +1,245 @@
+{
+  "name": "에코프로",
+  "code": "450080",
+  "price": 35950,
+  "is_index": false,
+  "change_pct": 1.41,
+  "timestamp": "2026-08-07T07:13:12.804496+00:00",
+  "data_freshness": {
+    "daily": "2026-08-07",
+    "weekly": "2026-08-07",
+    "monthly": "2026-08-31",
+    "hourly": ""
+  },
+  "bear_warnings": {
+    "has_warning": false,
+    "warnings": []
+  },
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": false
+    },
+    "월봉": {
+      "ok": true,
+      "found": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "단기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "장기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "단기": {
+        "ok": true,
+        "k": 87.6,
+        "d": 86.0,
+        "direction": "보합",
+        "zone": "과매수",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      },
+      "중기": {
+        "ok": true,
+        "k": 71.0,
+        "d": 50.9,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      },
+      "장기": {
+        "ok": true,
+        "k": 33.7,
+        "d": 19.1,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      }
+    },
+    "monthly": {
+      "단기": {
+        "ok": true,
+        "k": 10.4,
+        "d": 22.0,
+        "direction": "하락",
+        "zone": "과매도",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      },
+      "중기": {
+        "ok": true,
+        "k": 30.2,
+        "d": 52.1,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      },
+      "장기": {
+        "ok": false
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기상승·중기상승·단기보합",
+        "월봉 단기 하락"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 35950,
+    "ma5": 34130,
+    "ma20": 34220,
+    "ma60": 47329,
+    "position": "5일선 위 / 20일선 위 / 60일선 아래",
+    "gap_pct": -0.26,
+    "state": "역배열(5<20<60)",
+    "forecast": "약 0일 뒤 5·20 골든크로스 예상 (갭 -0.3%, 수렴 2.15%/일)",
+    "forecast60": null,
+    "note": null,
+    "ma5_forecast": {
+      "ok": true,
+      "direction": "상승",
+      "slope_pct": 2.57,
+      "now": 34130,
+      "proj": {
+        "1일후": 35006,
+        "2일후": 35882,
+        "3일후": 36758
+      }
+    },
+    "ma20_forecast": {
+      "ok": true,
+      "direction": "하락",
+      "slope_pct": -0.45,
+      "now": 34220,
+      "proj": {
+        "1일후": 34067,
+        "2일후": 33913,
+        "3일후": 33760
+      }
+    }
+  },
+  "pullback": {
+    "ok": true,
+    "has_signal": true,
+    "signals": [
+      {
+        "line": "5일선",
+        "level": 34130,
+        "stop": 33447,
+        "type": "1차 눌림목(단기)",
+        "desc": "종가 5일선(34,130) 위 + 저가가 5일선 지지터치 → 단기 눌림목 매수 관점"
+      },
+      {
+        "line": "20일선",
+        "level": 34220,
+        "stop": 33193,
+        "type": "중기 눌림목(추세 유지)",
+        "desc": "종가 20일선(34,220) 위 + 저가 20일선 지지터치 → 중기 추세 눌림 매수"
+      }
+    ],
+    "confidence": "하",
+    "opinion": "역배열이라 눌림목보다 추세 반등 확인 필요 / 단, 당일 거래량이 5일선 위 → 눌림보다 이탈/변동성 주의 / 일봉 단기 스토캐 과매수(K87.6) → 추가 눌림 여지",
+    "price": 35950
+  },
+  "supply_demand": {
+    "ok": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "summary": "수급 데이터 조회 실패(KRX 로그인/차단 확인 필요)"
+  },
+  "shorting": {
+    "ok": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "summary": "공매도 데이터 조회 실패(KRX 로그인/차단 확인 필요)"
+  },
+  "daily_verdict": {
+    "score": 1,
+    "verdict": "완만한 상승/반등 시도",
+    "reasons": [
+      "역배열(5<20<60)",
+      "약 0일 뒤 5·20 골든크로스 예상 (갭 -0.3%, 수렴 2.15%/일)",
+      "5일선 지지터치(1차 눌림목(단기))"
+    ],
+    "breakdown": [
+      {
+        "item": "일봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "일봉 단기 스토캐",
+        "pts": 0,
+        "note": "단기 스토캐 보합"
+      },
+      {
+        "item": "이평 배열",
+        "pts": -1,
+        "note": "역배열(5<20<60)"
+      },
+      {
+        "item": "5·20 골든크로스 임박",
+        "pts": 1,
+        "note": "약 0일 뒤 5·20 골든크로스 예상 (갭 -0.3%, 수렴 2.15%/일)"
+      },
+      {
+        "item": "눌림목 매수신호",
+        "pts": 1,
+        "note": "5일선 지지터치(1차 눌림목(단기))"
+      }
+    ],
+    "strong_bear": false
+  },
+  "monthly_verdict": {
+    "score": -3,
+    "verdict": "월봉 약세 지속",
+    "reasons": [
+      "중기 하락(K30.2)",
+      "단기 하락(K10.4)",
+      "월 5<20 (중장기 역배열)"
+    ],
+    "breakdown": [
+      {
+        "item": "월봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "월봉 장기 스토캐",
+        "pts": 0,
+        "note": "장기 데이터 부족"
+      },
+      {
+        "item": "월봉 중기 스토캐",
+        "pts": -1,
+        "note": "중기 하락(K30.2)"
+      },
+      {
+        "item": "월봉 단기 스토캐",
+        "pts": -1,
+        "note": "단기 하락(K10.4)"
+      },
+      {
+        "item": "월봉 MA 배열",
+        "pts": -1,
+        "note": "월 5<20 (중장기 역배열)"
+      }
+    ],
+    "n_months": 34,
+    "note": "월봉 판단 근거: 확보 34개월(약 2년) — 중기까지 판단"
+  }
+}
