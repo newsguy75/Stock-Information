@@ -61,18 +61,66 @@ def fetch_daily_pykrx(code: str, years: float = 1.0) -> pd.DataFrame:
 
 
 def fetch_daily(code: str, years: float = 1.0) -> pd.DataFrame:
-    """일봉(단기, 기본 1년): FDR 우선, 실패 시 pykrx."""
+    """일봉(단기, 기본 1년): FDR과 pykrx 중 더 최신 데이터를 선택.
+
+    FDR이 최근 거래일을 누락하는 경우가 있어(끝단이 며칠 전에서 멈춤),
+    두 소스의 마지막 날짜를 비교해 더 최근인 쪽을 사용한다. 실패한 소스는 무시.
+    """
+    df_fdr, df_pk = None, None
     try:
-        df = fetch_daily_fdr(code, years)
-        if len(df) > 0:
-            return df
+        df_fdr = fetch_daily_fdr(code, years)
+        if len(df_fdr) == 0:
+            df_fdr = None
     except Exception as e:
         print(f"[warn] FDR 실패 {code}: {e}")
     try:
-        return fetch_daily_pykrx(code, years)
+        df_pk = fetch_daily_pykrx(code, years)
+        if len(df_pk) == 0:
+            df_pk = None
     except Exception as e:
-        print(f"[error] pykrx도 실패 {code}: {e}")
+        print(f"[warn] pykrx 실패 {code}: {e}")
+
+    # 둘 다 실패
+    if df_fdr is None and df_pk is None:
+        print(f"[error] 일봉 수집 전부 실패 {code}")
         return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    # 하나만 성공
+    if df_fdr is None:
+        return _drop_stale_tail(df_pk, code)
+    if df_pk is None:
+        return _drop_stale_tail(df_fdr, code)
+
+    # 둘 다 성공 → 마지막 날짜가 더 최근인 쪽 선택
+    last_fdr = df_fdr.index[-1]
+    last_pk = df_pk.index[-1]
+    chosen = df_fdr if last_fdr >= last_pk else df_pk
+    src = "FDR" if last_fdr >= last_pk else "pykrx"
+    if last_fdr != last_pk:
+        print(f"[info] {code} 일봉 끝단: FDR {last_fdr.date()} / pykrx {last_pk.date()} → {src} 채택")
+    return _drop_stale_tail(chosen, code)
+
+
+def _drop_stale_tail(df: pd.DataFrame, code: str = "") -> pd.DataFrame:
+    """끝단의 '진짜 미체결/미갱신' 행만 제거.
+    - 종가가 NaN인 행 (데이터 소스가 자리만 만들어둔 경우)
+    을 제거한다. 거래량 0만으로는 제거하지 않는다(정상 거래일에도 장 시작
+    직후엔 거래량이 0이거나, 관리종목·거래정지 후 재개일 등 예외가 있어
+    유효한 최신 봉을 잘못 날릴 수 있기 때문)."""
+    if df is None or len(df) == 0:
+        return df
+    d = df.copy()
+    # 종가 NaN 행만 제거
+    d = d[d["close"].notna()]
+    # 끝단에서 OHLC가 전부 결측이거나 0인 진짜 빈 행만 제거
+    while len(d) > 1:
+        last = d.iloc[-1]
+        empty = (pd.isna(last[["open", "high", "low", "close"]]).all()
+                 or (last[["open", "high", "low", "close"]] == 0).all())
+        if empty:
+            d = d.iloc[:-1]
+        else:
+            break
+    return d
 
 
 # ----------------------------------------------------------------------

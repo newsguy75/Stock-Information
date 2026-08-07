@@ -380,12 +380,15 @@ def build_html(analysis: dict) -> str:
   .bear-badge {{ color:#fff; font-size:11px; font-weight:700; padding:2px 8px;
     border-radius:5px; flex-shrink:0; }}
   .bear-desc {{ font-size:13px; color:#f0d0d4; }}
+  .freshness {{ font-size:12px; color:{C_SUB}; margin-bottom:12px;
+    padding:6px 10px; background:{C_CARD}; border-radius:6px; }}
 </style></head>
 <body><div class="wrap">
   <div class="head">
     <h1>{esc(a["name"])}</h1><span class="code">{a["code"]}</span>
     <span class="price" style="color:{chg_col}">{a["price"]:,}원 ({chg:+.2f}%)</span>
   </div>
+  <div class="freshness">📅 데이터 기준: 일봉 {esc(a.get("data_freshness",{}).get("daily","?"))} · 주봉 {esc(a.get("data_freshness",{}).get("weekly","?"))} · 월봉 {esc(a.get("data_freshness",{}).get("monthly","?"))}{" · 1H " + esc(str(a.get("data_freshness",{}).get("hourly",""))[:16]) if a.get("data_freshness",{}).get("hourly") else ""}</div>
   {bear_html}{chart_html}{div_html}{stoch_html}{ma_html}{pb_html}{sup_html}{sh_html}{daily_html}{monthly_html}
   <div class="foot">생성: {esc(a["timestamp"])} · 일봉 60일 / 월봉 최대 5년(60개월)</div>
 </div></body></html>"""

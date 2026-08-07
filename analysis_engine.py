@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from mtf_stoch_scanner import stochastic, detect_divergence
+from signals import to_weekly
 
 
 # ======================================================================
@@ -41,6 +42,11 @@ def _stoch_dir(df: pd.DataFrame, k_period: int, k_smooth: int, d_period: int) ->
         return {"ok": False}
     k_now, k_prev = float(k.iloc[-1]), float(k.iloc[-2])
     d_now = float(d.iloc[-1]) if len(d) else float("nan")
+    # 이 스토캐가 참조한 최신 봉의 날짜 (진단용)
+    try:
+        last_bar_date = str(pd.Timestamp(df.index[-1]).date())
+    except Exception:
+        last_bar_date = ""
     # 방향: 상승/하락/보합 (%K 기울기 + %K vs %D)
     slope = k_now - k_prev
     if slope > 1.5:
@@ -57,7 +63,8 @@ def _stoch_dir(df: pd.DataFrame, k_period: int, k_smooth: int, d_period: int) ->
         elif k.iloc[-2] > d.iloc[-2] and k.iloc[-1] < d.iloc[-1]:
             cross = "데드크로스"
     return {"ok": True, "k": round(k_now, 1), "d": round(d_now, 1),
-            "direction": direction, "zone": zone, "cross": cross}
+            "direction": direction, "zone": zone, "cross": cross,
+            "last_bar": last_bar_date}
 
 
 def analyze_stoch_frames(hourly: pd.DataFrame, daily: pd.DataFrame,
@@ -906,10 +913,24 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
     prev_close = float(daily["close"].iloc[-2])
     chg = (last_close - prev_close) / prev_close * 100
 
+    # 데이터 신선도 (각 프레임의 마지막 봉 날짜)
+    def _last(df):
+        try:
+            return str(pd.Timestamp(df.index[-1]).date())
+        except Exception:
+            return ""
+    data_freshness = {
+        "daily": _last(daily),
+        "weekly": _last(to_weekly(daily)) if len(daily) > 5 else "",
+        "monthly": _last(monthly_full),
+        "hourly": (str(pd.Timestamp(hourly.index[-1])) if hourly is not None and len(hourly) else ""),
+    }
+
     return {
         "name": name, "code": code,
         "price": round(last_close), "change_pct": round(chg, 2),
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "data_freshness": data_freshness,   # 각 프레임 마지막 봉 날짜
         "bear_warnings": bear,      # 2-B 하락 경고 (최우선)
         "divergence": div,          # 2번
         "stoch_frames": stoch,      # 3번
