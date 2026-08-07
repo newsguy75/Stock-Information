@@ -145,23 +145,87 @@ def fetch_monthly_source(code: str, years: float = 5.0) -> pd.DataFrame:
         return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
 
+def fetch_index_daily(symbol: str, years: float = 1.0) -> pd.DataFrame:
+    """지수 일봉 수집 (KS11=코스피, KQ11=코스닥). FDR DataReader 사용."""
+    import FinanceDataReader as fdr
+    end = dt.date.today()
+    start = end - dt.timedelta(days=int(years * 365.25))
+    df = fdr.DataReader(symbol, start, end)
+    df = df.rename(columns=str.lower)
+    keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+    df = df[keep]
+    if "volume" not in df.columns:
+        df["volume"] = 0
+    df.index = pd.to_datetime(df.index)
+    return _drop_stale_tail(df.sort_index(), symbol)
+
+
 # ----------------------------------------------------------------------
 # 1시간봉 (Naver 분봉 -> resample)
 # ----------------------------------------------------------------------
 def fetch_minute_naver(code: str, count: int = 500) -> pd.DataFrame:
     """
-    Naver fchart 분봉 API. count = 최근 몇 개의 1분봉.
-    1시간봉 60봉을 만들려면 국내장 하루 ~390분 → 며칠치 필요.
-    반환: 1분봉 OHLCV DataFrame.
+    네이버 분봉 수집. 구형 sise.nhn(XML)은 폐기되어, 현재 유효한
+    분봉 엔드포인트를 순차 시도한다.
 
-    엔드포인트 응답은 XML(<item data="날짜|시가|고가|저가|종가|거래량">) 형식.
+    반환: 1분봉 OHLCV DataFrame (columns: open/high/low/close/volume, DatetimeIndex).
+    실패 시 빈 DataFrame.
     """
-    url = ("https://fchart.stock.naver.com/sise.nhn"
-           f"?symbol={code}&timeframe=minute&count={count}&requestType=0")
-    r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-    r.raise_for_status()
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"}
+
+    # 시도 1: fchart 분봉 (신 도메인, XML/텍스트 응답)
+    for base in ("https://api.finance.naver.com/siseJson.naver",
+                 "https://fchart.stock.naver.com/sise.nhn"):
+        try:
+            if "siseJson" in base:
+                # siseJson은 분봉 미지원 → skip (일/주/월만)
+                continue
+            url = f"{base}?symbol={code}&timeframe=minute&count={count}&requestType=0"
+            r = requests.get(url, timeout=10, headers=headers)
+            r.raise_for_status()
+            df = _parse_naver_minute_xml(r.text)
+            if len(df) > 0:
+                return df
+        except Exception:
+            continue
+
+    # 시도 2: 네이버 모바일 분봉 폴링 API (JSON)
+    try:
+        # 최근 N개 분봉 (minuteCandle)
+        url = (f"https://api.stock.naver.com/chart/domestic/item/{code}/minute"
+               f"?minuteUnit=1&count={count}")
+        r = requests.get(url, timeout=10, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+        rows = []
+        for it in (data if isinstance(data, list) else data.get("result", [])):
+            # 키 이름은 응답 스키마에 따라 방어적으로 처리
+            ts = it.get("localDateTime") or it.get("dateTime") or it.get("time")
+            o = it.get("openPrice") or it.get("open")
+            h = it.get("highPrice") or it.get("high")
+            l = it.get("lowPrice") or it.get("low")
+            c = it.get("closePrice") or it.get("close")
+            v = it.get("accumulatedTradingVolume") or it.get("volume") or 0
+            if ts is None or c is None:
+                continue
+            try:
+                rows.append((pd.to_datetime(ts), float(o), float(h),
+                             float(l), float(c), float(v)))
+            except (ValueError, TypeError):
+                continue
+        if rows:
+            df = pd.DataFrame(rows, columns=["dt", "open", "high", "low", "close", "volume"]).set_index("dt")
+            return df.sort_index()
+    except Exception:
+        pass
+
+    return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+
+def _parse_naver_minute_xml(text: str) -> pd.DataFrame:
+    """구형 fchart XML(<item data="날짜|시가|고가|저가|종가|거래량">) 파싱."""
     rows = []
-    for line in r.text.splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if 'data="' not in line:
             continue
