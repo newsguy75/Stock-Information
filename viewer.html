@@ -70,6 +70,10 @@
     <h1>📊 포트폴리오 리포트</h1>
     <span class="updated" id="updated"></span>
     <div class="controls">
+      <button onclick="openBriefing()" title="오늘의 시황 브리핑"
+              style="background:var(--accent);color:#fff;border:0">
+        📊 시황 브리핑
+      </button>
       <select id="picker" onchange="onPick()"></select>
       <button onclick="reload()" title="최신 데이터 다시 불러오기">↻ 새로고침</button>
       <a href="add.html" style="text-decoration:none"><button title="종목 추가">＋ 종목 추가</button></a>
@@ -122,13 +126,6 @@ async function loadManifest(){
     items = FALLBACK;
     document.getElementById("updated").textContent = "· (manifest 미발견, 폴백 목록)";
   }
-  // 시장 브리핑을 최상단 고정으로 추가 (data/latest/MARKET_시황.html 존재 시 활성)
-  items.unshift({
-    name: "📊 오늘의 시장 브리핑",
-    code: "MARKET",
-    group: "시장 브리핑",
-    _custom_url: `${DATA_BASE}/MARKET_시황.html`,
-  });
   render();
 }
 
@@ -201,6 +198,24 @@ function onPick(){
 }
 function reload(){ loadManifest().then(()=>{ if(current!==null) select(current); }); }
 function toggleSidebar(){ document.getElementById("sidebar").classList.toggle("hidden"); }
+
+// 시황 브리핑을 iframe에 로드 (항상 최신 latest 파일 + 캐시 무효화)
+function openBriefing(){
+  const frame = document.getElementById("frame");
+  const ph = document.getElementById("placeholder");
+  ph.style.display = "none";
+  const bust = Date.now() + "_" + Math.random().toString(36).slice(2,8);
+  frame.src = `${DATA_BASE}/MARKET_시황.html?v=${bust}`;
+  // 사이드바 선택 초기화 (시황은 종목이 아니라서)
+  document.querySelectorAll(".item").forEach(el => el.classList.remove("active"));
+  document.getElementById("picker").value = "";
+  current = null;
+  frame.onerror = () => {
+    ph.style.display = "flex";
+    ph.innerHTML = `<div class="err">시황 브리핑이 아직 생성되지 않았습니다.<br>매일 KST 10시(VN 08시)에 자동 생성됩니다.</div>`;
+  };
+  if (window.innerWidth <= 640) document.getElementById("sidebar").classList.add("hidden");
+}
 
 // ===== 자동 새로고침 =====
 let lastUpdated = null;
