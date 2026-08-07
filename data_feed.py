@@ -61,10 +61,10 @@ def fetch_daily_pykrx(code: str, years: float = 1.0) -> pd.DataFrame:
 
 
 def fetch_daily(code: str, years: float = 1.0) -> pd.DataFrame:
-    """일봉(단기, 기본 1년): FDR과 pykrx 중 더 최신 데이터를 선택.
+    """일봉(단기, 기본 1년): FDR + pykrx 중 최신 선택 + 네이버 실시간 보정.
 
-    FDR이 최근 거래일을 누락하는 경우가 있어(끝단이 며칠 전에서 멈춤),
-    두 소스의 마지막 날짜를 비교해 더 최근인 쪽을 사용한다. 실패한 소스는 무시.
+    FDR/pykrx가 오늘 봉을 아직 안 받았으면 (또는 장중이라 확정 전이면)
+    네이버 실시간 시세로 오늘 봉을 만들어 붙이거나 갱신한다.
     """
     df_fdr, df_pk = None, None
     try:
@@ -80,24 +80,83 @@ def fetch_daily(code: str, years: float = 1.0) -> pd.DataFrame:
     except Exception as e:
         print(f"[warn] pykrx 실패 {code}: {e}")
 
-    # 둘 다 실패
     if df_fdr is None and df_pk is None:
         print(f"[error] 일봉 수집 전부 실패 {code}")
         return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-    # 하나만 성공
     if df_fdr is None:
-        return _drop_stale_tail(df_pk, code)
-    if df_pk is None:
-        return _drop_stale_tail(df_fdr, code)
+        chosen = _drop_stale_tail(df_pk, code)
+    elif df_pk is None:
+        chosen = _drop_stale_tail(df_fdr, code)
+    else:
+        last_fdr = df_fdr.index[-1]
+        last_pk = df_pk.index[-1]
+        chosen = df_fdr if last_fdr >= last_pk else df_pk
+        src = "FDR" if last_fdr >= last_pk else "pykrx"
+        if last_fdr != last_pk:
+            print(f"[info] {code} 일봉 끝단: FDR {last_fdr.date()} / pykrx {last_pk.date()} → {src} 채택")
+        chosen = _drop_stale_tail(chosen, code)
 
-    # 둘 다 성공 → 마지막 날짜가 더 최근인 쪽 선택
-    last_fdr = df_fdr.index[-1]
-    last_pk = df_pk.index[-1]
-    chosen = df_fdr if last_fdr >= last_pk else df_pk
-    src = "FDR" if last_fdr >= last_pk else "pykrx"
-    if last_fdr != last_pk:
-        print(f"[info] {code} 일봉 끝단: FDR {last_fdr.date()} / pykrx {last_pk.date()} → {src} 채택")
-    return _drop_stale_tail(chosen, code)
+    # 네이버 실시간 보정 (오늘 봉 누락 or 장중 값 갱신)
+    today = dt.date.today()
+    last_date = chosen.index[-1].date() if len(chosen) else None
+    realtime = _fetch_stock_realtime_naver(code)
+    if realtime and realtime.get("close"):
+        if last_date != today:
+            print(f"[info] {code} 오늘 봉 누락({last_date}) → 네이버 실시간 append: {realtime['close']}")
+            new_row = pd.DataFrame([{
+                "open": realtime.get("open", realtime["close"]),
+                "high": realtime.get("high", realtime["close"]),
+                "low": realtime.get("low", realtime["close"]),
+                "close": realtime["close"],
+                "volume": realtime.get("volume", 0),
+            }], index=[pd.Timestamp(today)])
+            chosen = pd.concat([chosen, new_row])
+        else:
+            # 오늘 봉이 있어도 값이 다르면(장중) 실시간으로 갱신
+            if abs(float(chosen["close"].iloc[-1]) - realtime["close"]) > 1:
+                for k in ["open", "high", "low", "close", "volume"]:
+                    if k in realtime and realtime[k] is not None:
+                        chosen.iat[-1, chosen.columns.get_loc(k)] = realtime[k]
+
+    return chosen
+
+
+def _fetch_stock_realtime_naver(code: str) -> dict | None:
+    """네이버 실시간 개별 종목 시세.
+    API: polling.finance.naver.com/api/realtime/domestic/stock/{code}"""
+    url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
+    try:
+        r = requests.get(url, timeout=8,
+                         headers={"User-Agent": "Mozilla/5.0",
+                                  "Referer": "https://finance.naver.com/"})
+        r.raise_for_status()
+        j = r.json()
+        d = (j.get("datas") or [None])[0]
+        if not d:
+            return None
+
+        def num(v):
+            if v is None:
+                return None
+            s = str(v).replace(",", "")
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        close = num(d.get("closePrice") or d.get("currentPrice"))
+        if close is None:
+            return None
+        return {
+            "close": close,
+            "open": num(d.get("openPrice")),
+            "high": num(d.get("highPrice")),
+            "low": num(d.get("lowPrice")),
+            "volume": num(d.get("accumulatedTradingVolume")) or 0,
+        }
+    except Exception as e:
+        print(f"[warn] 네이버 실시간 종목 실패 {code}: {e}")
+        return None
 
 
 def _drop_stale_tail(df: pd.DataFrame, code: str = "") -> pd.DataFrame:
