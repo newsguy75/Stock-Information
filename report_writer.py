@@ -110,21 +110,21 @@ def build_html(analysis: dict) -> str:
             '<div class="bear-title">🚨 하락 경고 신호 (일봉 기준)</div>'
             + "".join(w_rows) + '</div>')
 
-    # 0. 3프레임 차트 (1H / 일 / 월)
+    # 0. 2프레임 차트 (일 / 월) - 세로 2줄, 가득 크게
     charts = a.get("charts", {})
     chart_imgs = []
-    for key, label in [("hourly", "1시간봉"), ("daily", "일봉"), ("monthly", "월봉")]:
+    for key, label in [("daily", "일봉"), ("monthly", "월봉")]:
         uri = charts.get(key)
         if uri:
-            chart_imgs.append(f'<div class="chart"><img src="{uri}" alt="{label}"></div>')
+            chart_imgs.append(f'<div class="chart-full"><img src="{uri}" alt="{label}"></div>')
         else:
-            chart_imgs.append(f'<div class="chart na-chart">{label}<br><span class="sub">데이터 없음</span></div>')
-    chart_html = _section("1. 차트 (1H · 일 · 월 / 캔들+MA5·20+거래량+스토캐)",
-                          f'<div class="charts">{"".join(chart_imgs)}</div>')
+            chart_imgs.append(f'<div class="chart-full na-chart">{label}<br><span class="sub">데이터 없음</span></div>')
+    chart_html = _section("1. 차트 (일 · 월 / 캔들+MA5·20·60+거래량+스토캐)",
+                          f'<div class="charts-vert">{"".join(chart_imgs)}</div>')
 
-    # 2. 다이버전스
+    # 2. 다이버전스 (일봉·월봉만)
     div_rows = []
-    for frame in ["일봉", "월봉", "1H"]:
+    for frame in ["일봉", "월봉"]:
         d = a["divergence"].get(frame, {})
         if not d.get("ok"):
             div_rows.append(f'<div class="row"><span class="k">{frame}</span><span class="v na">데이터 부족</span></div>')
@@ -139,18 +139,9 @@ def build_html(analysis: dict) -> str:
                 f'<span class="sub">{esc(d["basis"])}</span></span></div>')
     div_html = _section("2. 스토캐스틱 다이버전스 (근거·시점)", "".join(div_rows))
 
-    # 3. 스토캐 프레임
+    # 3. 스토캐 프레임 (일봉·월봉만)
     s = a["stoch_frames"]
-    def frame_line(fname, keys):
-        cells = "".join(_sd(k, s[fname].get(k, {})) for k in keys)
-        return f'<div class="frame"><div class="frame-n">{fname}</div><div class="chips">{cells}</div></div>'
     stoch_body = (
-        frame_line("1시간봉", []) if False else ""
-    )
-    stoch_body = (
-        f'<div class="frame"><div class="frame-n">1시간봉</div><div class="chips">'
-        + _sd("장기", s["hourly"].get("장기", {})) + _sd("중기", s["hourly"].get("중기", {})) + _sd("단기", s["hourly"].get("단기", {}))
-        + '</div></div>'
         f'<div class="frame"><div class="frame-n">일봉</div><div class="chips">'
         + _sd("장기", s["daily"].get("장기", {})) + _sd("중기", s["daily"].get("중기", {})) + _sd("단기", s["daily"].get("단기", {}))
         + '</div></div>'
@@ -160,7 +151,7 @@ def build_html(analysis: dict) -> str:
     )
     verdict_lines = "".join(f'<li>{esc(l)}</li>' for l in s["verdict"].get("lines", []))
     stoch_body += f'<ul class="verdict-list">{verdict_lines}</ul>'
-    stoch_html = _section("3. 스토캐스틱 프레임별 방향성 (1H 장·중·단 / 일 / 월)", stoch_body)
+    stoch_html = _section("3. 스토캐스틱 프레임별 방향성 (일 · 월 / 단기·중기·장기)", stoch_body)
 
     # 4. 이평선 (5/20/60 + 방향예측)
     ma = a["ma"]
@@ -409,6 +400,12 @@ def build_html(analysis: dict) -> str:
   .chart {{ flex:1; min-width:210px; }}
   .chart img {{ width:100%; border-radius:6px; display:block; }}
   .na-chart {{ flex:1; min-width:210px; text-align:center; padding:40px 0;
+    color:#5a5f6a; border:1px dashed {C_LINE}; border-radius:6px; }}
+  /* 세로 2줄 차트 (일봉/월봉 가득 차게) */
+  .charts-vert {{ display:flex; flex-direction:column; gap:16px; }}
+  .chart-full {{ width:100%; }}
+  .chart-full img {{ width:100%; height:auto; border-radius:6px; display:block; }}
+  .chart-full.na-chart {{ text-align:center; padding:60px 0;
     color:#5a5f6a; border:1px dashed {C_LINE}; border-radius:6px; }}
   .score-tbl {{ width:100%; border-collapse:collapse; font-size:12px; margin-top:4px; }}
   .score-tbl th {{ color:{C_SUB}; text-align:left; padding:4px 6px; border-bottom:1px solid {C_LINE}; font-weight:600; }}

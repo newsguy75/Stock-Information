@@ -42,8 +42,10 @@ def _stoch(df, k=14, ks=3, d=3):
     return slowk, slowd
 
 
-def make_chart(df: pd.DataFrame, title: str, max_bars: int = 80) -> str | None:
-    """단일 프레임 차트 → base64 data URI. 실패/데이터부족 시 None."""
+def make_chart(df: pd.DataFrame, title: str, max_bars: int = 80,
+               show_ma60: bool = False) -> str | None:
+    """단일 프레임 차트 → base64 data URI. 실패/데이터부족 시 None.
+    show_ma60=True 일 때만 60일선 표시 (일봉에만 적용)."""
     if df is None or len(df) < 20:
         return None
     d = df.tail(max_bars).copy().reset_index(drop=True)
@@ -52,21 +54,20 @@ def make_chart(df: pd.DataFrame, title: str, max_bars: int = 80) -> str | None:
 
     ma5 = d["close"].rolling(5).mean()
     ma20 = d["close"].rolling(20).mean()
+    ma60 = d["close"].rolling(60).mean() if show_ma60 else None
     slowk, slowd = _stoch(d)
 
     up = d["close"] >= d["open"]
     colors = np.where(up, RED, BLUE)
 
-    fig = plt.figure(figsize=(4.6, 5.2), dpi=110)
+    fig = plt.figure(figsize=(12.0, 7.5), dpi=100)
     fig.patch.set_facecolor(BG)
     gs = GridSpec(3, 1, height_ratios=[3, 1, 1.2], hspace=0.08)
 
     # --- 1) 캔들 + MA ---
     ax1 = fig.add_subplot(gs[0])
     ax1.set_facecolor(BG)
-    # 심지
     ax1.vlines(x, d["low"], d["high"], color=colors, linewidth=0.6)
-    # 몸통
     body_w = 0.6
     for i in range(n):
         o, c = d["open"].iloc[i], d["close"].iloc[i]
@@ -75,6 +76,8 @@ def make_chart(df: pd.DataFrame, title: str, max_bars: int = 80) -> str | None:
                                      facecolor=colors[i], edgecolor=colors[i], linewidth=0.5))
     ax1.plot(x, ma5, color=MA5_C, linewidth=1.0, label="MA5")
     ax1.plot(x, ma20, color=MA20_C, linewidth=1.0, label="MA20")
+    if ma60 is not None and ma60.notna().any():
+        ax1.plot(x, ma60, color="#d8b24a", linewidth=1.0, label="MA60")
     ax1.set_title(title, color=TXT, fontsize=10, loc="left", pad=4)
     ax1.legend(loc="upper left", fontsize=6, facecolor=BG, edgecolor=GRID, labelcolor=TXT)
     ax1.tick_params(colors=TXT, labelsize=6, bottom=False, labelbottom=False)
@@ -120,9 +123,10 @@ def make_chart(df: pd.DataFrame, title: str, max_bars: int = 80) -> str | None:
 
 
 def make_three_frame_charts(hourly, daily, monthly) -> dict:
-    """1H/일/월 3프레임 차트를 각각 그려 dict로 반환."""
+    """일봉/월봉 2프레임 차트를 각각 그려 dict로 반환.
+    1시간봉은 UI에서 삭제되어 None. 함수명은 기존 호환성 유지."""
     return {
-        "hourly": make_chart(hourly, "1H (60min)", max_bars=80),
-        "daily": make_chart(daily, "Daily (60d)", max_bars=70),
+        "hourly": None,   # UI에서 제외 (뷰어 요청)
+        "daily": make_chart(daily, "Daily", max_bars=80, show_ma60=True),
         "monthly": make_chart(monthly, "Monthly (5y)", max_bars=60),
     }
