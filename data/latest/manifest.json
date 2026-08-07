@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-08 00:49 (VN)",
+  "updated": "2026-08-08 01:55 (VN)",
   "count": 32,
   "items": [
     {
@@ -31,7 +31,7 @@
       "code": "000660",
       "chg": -4.88,
       "group": "보유종목",
-      "verdict": "하락 주의(관망)",
+      "verdict": "약세/조정 주의",
       "bear": true
     },
     {
@@ -39,7 +39,7 @@
       "code": "003490",
       "chg": -1.27,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "완만한 상승/반등 시도",
       "bear": false
     },
     {
@@ -47,7 +47,7 @@
       "code": "047810",
       "chg": 2.73,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "완만한 상승/반등 시도",
       "bear": false
     },
     {
@@ -63,7 +63,7 @@
       "code": "105840",
       "chg": -1.22,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -71,7 +71,7 @@
       "code": "034020",
       "chg": 0.92,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -79,7 +79,7 @@
       "code": "023160",
       "chg": 0.22,
       "group": "보유종목",
-      "verdict": "약세/조정 주의",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -87,7 +87,7 @@
       "code": "006360",
       "chg": -2.91,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "보합 예상",
       "bear": false
     },
     {
@@ -95,7 +95,7 @@
       "code": "000720",
       "chg": -2.4,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -103,7 +103,7 @@
       "code": "039610",
       "chg": 1.34,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -111,7 +111,7 @@
       "code": "306200",
       "chg": 1.07,
       "group": "보유종목",
-      "verdict": "적극 매수 관점",
+      "verdict": "원만한 상승 예상",
       "bear": false
     },
     {
@@ -119,7 +119,7 @@
       "code": "033500",
       "chg": -0.82,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -127,7 +127,7 @@
       "code": "015760",
       "chg": -0.97,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "보합 예상",
       "bear": false
     },
     {
@@ -135,7 +135,7 @@
       "code": "010120",
       "chg": -0.74,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "보합 예상",
       "bear": false
     },
     {
@@ -143,7 +143,7 @@
       "code": "017510",
       "chg": -1.08,
       "group": "보유종목",
-      "verdict": "보합 예상",
+      "verdict": "약세/조정 주의",
       "bear": false
     },
     {
@@ -159,7 +159,7 @@
       "code": "214150",
       "chg": 0.77,
       "group": "보유종목",
-      "verdict": "적극 매수 관점",
+      "verdict": "원만한 상승 예상",
       "bear": false
     },
     {
@@ -175,7 +175,7 @@
       "code": "010690",
       "chg": -1.83,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -207,7 +207,7 @@
       "code": "382900",
       "chg": -1.01,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -215,7 +215,7 @@
       "code": "079900",
       "chg": -1.79,
       "group": "보유종목",
-      "verdict": "보합 예상",
+      "verdict": "약세/조정 주의",
       "bear": false
     },
     {
@@ -223,7 +223,7 @@
       "code": "006400",
       "chg": 7.49,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "약세/조정 주의",
       "bear": true
     },
     {
@@ -231,7 +231,7 @@
       "code": "267320",
       "chg": 1.15,
       "group": "보유종목",
-      "verdict": "원만한 상승 예상",
+      "verdict": "보합 예상",
       "bear": true
     },
     {
@@ -239,7 +239,7 @@
       "code": "450080",
       "chg": 1.41,
       "group": "보유종목",
-      "verdict": "보합 예상",
+      "verdict": "완만한 상승/반등 시도",
       "bear": false
     },
     {
@@ -255,7 +255,7 @@
       "code": "042660",
       "chg": -1.43,
       "group": "보유종목",
-      "verdict": "완만한 상승/반등 시도",
+      "verdict": "보합 예상",
       "bear": true
     }
   ]
