@@ -1,0 +1,241 @@
+{
+  "name": "KOSPI",
+  "code": "KS11",
+  "price": 6217.29,
+  "is_index": true,
+  "change_pct": -1.26,
+  "timestamp": "2026-08-07T05:50:36.383668+00:00",
+  "data_freshness": {
+    "daily": "2026-08-07",
+    "weekly": "2026-08-07",
+    "monthly": "2026-08-31",
+    "hourly": ""
+  },
+  "bear_warnings": {
+    "has_warning": true,
+    "warnings": [
+      {
+        "kind": "데드캣바운스",
+        "level": "주의",
+        "date": "",
+        "desc": "급락 -25% 후 +11% 반등이나 20일선 하회 · 반등 거래량 미약(신뢰 낮음) → 데드캣바운스 경계"
+      }
+    ]
+  },
+  "divergence": {
+    "일봉": {
+      "ok": true,
+      "found": false
+    },
+    "월봉": {
+      "ok": true,
+      "found": false
+    },
+    "1H": {
+      "ok": false
+    }
+  },
+  "stoch_frames": {
+    "hourly": {
+      "장기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": false
+      },
+      "단기": {
+        "ok": false
+      }
+    },
+    "daily": {
+      "장기": {
+        "ok": true,
+        "k": 28.9,
+        "d": 18.4,
+        "direction": "상승",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      },
+      "중기": {
+        "ok": true,
+        "k": 60.7,
+        "d": 50.4,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      },
+      "단기": {
+        "ok": true,
+        "k": 60.0,
+        "d": 73.7,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-07"
+      }
+    },
+    "monthly": {
+      "장기": {
+        "ok": false
+      },
+      "중기": {
+        "ok": true,
+        "k": 75.5,
+        "d": 85.1,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      },
+      "단기": {
+        "ok": true,
+        "k": 46.8,
+        "d": 70.0,
+        "direction": "하락",
+        "zone": "중립",
+        "cross": null,
+        "last_bar": "2026-08-31"
+      }
+    },
+    "verdict": {
+      "lines": [
+        "일봉 장기상승·중기하락·단기하락",
+        "월봉 단기 하락"
+      ]
+    }
+  },
+  "ma": {
+    "ok": true,
+    "price": 6217,
+    "ma5": 6346,
+    "ma20": 6573,
+    "ma60": 7625,
+    "position": "5일선 아래 / 20일선 아래 / 60일선 아래",
+    "gap_pct": -3.45,
+    "state": "역배열(5<20<60)",
+    "forecast": "약 2일 뒤 5·20 골든크로스 예상 (갭 -3.5%, 수렴 1.56%/일)",
+    "forecast60": null,
+    "note": null,
+    "ma5_forecast": {
+      "ok": true,
+      "direction": "상승",
+      "slope_pct": 1.52,
+      "now": 6346,
+      "proj": {
+        "1일후": 6442,
+        "2일후": 6539,
+        "3일후": 6635
+      }
+    },
+    "ma20_forecast": {
+      "ok": true,
+      "direction": "하락",
+      "slope_pct": -0.88,
+      "now": 6573,
+      "proj": {
+        "1일후": 6515,
+        "2일후": 6457,
+        "3일후": 6399
+      }
+    }
+  },
+  "pullback": {
+    "ok": true,
+    "has_signal": false,
+    "status": "20일선(6,573) 하회 — 눌림목 아님, 지지 회복 확인 후 접근",
+    "confidence": "하",
+    "opinion": "역배열이라 눌림목보다 추세 반등 확인 필요 / 거래량 축소 동반(건전한 눌림 패턴)",
+    "price": 6217
+  },
+  "supply_demand": {
+    "ok": false,
+    "summary": "지수는 수급 데이터 해당 없음"
+  },
+  "shorting": {
+    "ok": false,
+    "summary": "지수는 공매도 데이터 해당 없음"
+  },
+  "daily_verdict": {
+    "score": -2,
+    "verdict": "약세/조정 주의",
+    "reasons": [
+      "단기 스토캐 하락(K60.0)",
+      "역배열(5<20<60)",
+      "약 2일 뒤 5·20 골든크로스 예상 (갭 -3.5%, 수렴 1.56%/일)",
+      "급락 -25% 후 +11% 반등이나 20일선 하회 · 반등 거래량 미약("
+    ],
+    "breakdown": [
+      {
+        "item": "일봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "일봉 단기 스토캐",
+        "pts": -1,
+        "note": "단기 스토캐 하락(K60.0)"
+      },
+      {
+        "item": "이평 배열",
+        "pts": -1,
+        "note": "역배열(5<20<60)"
+      },
+      {
+        "item": "5·20 골든크로스 임박",
+        "pts": 1,
+        "note": "약 2일 뒤 5·20 골든크로스 예상 (갭 -3.5%, 수렴 1.56%/일)"
+      },
+      {
+        "item": "눌림목 매수신호",
+        "pts": 0,
+        "note": "눌림 신호 없음(터치 대기)"
+      },
+      {
+        "item": "데드캣바운스",
+        "pts": -1,
+        "note": "급락 -25% 후 +11% 반등이나 20일선 하회 · 반등 거래량 미약("
+      }
+    ],
+    "strong_bear": false
+  },
+  "monthly_verdict": {
+    "score": -1,
+    "verdict": "월봉 약세 조정",
+    "reasons": [
+      "중기 하락(K75.5)",
+      "단기 하락(K46.8)",
+      "월 5>20 (중장기 정배열)"
+    ],
+    "breakdown": [
+      {
+        "item": "월봉 다이버전스",
+        "pts": 0,
+        "note": "다이버전스 없음"
+      },
+      {
+        "item": "월봉 장기 스토캐",
+        "pts": 0,
+        "note": "장기 데이터 부족"
+      },
+      {
+        "item": "월봉 중기 스토캐",
+        "pts": -1,
+        "note": "중기 하락(K75.5)"
+      },
+      {
+        "item": "월봉 단기 스토캐",
+        "pts": -1,
+        "note": "단기 하락(K46.8)"
+      },
+      {
+        "item": "월봉 MA 배열",
+        "pts": 1,
+        "note": "월 5>20 (중장기 정배열)"
+      }
+    ],
+    "n_months": 37,
+    "note": "월봉 판단 근거: 확보 37개월(약 3년) — 중기까지 판단"
+  }
+}
