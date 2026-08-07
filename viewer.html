@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>포트폴리오 리포트 뷰어</title>
+<style>
+  :root {
+    --bg:#0f1115; --card:#1a1d24; --line:#2a2e37; --text:#e6e8ec;
+    --sub:#9aa0aa; --up:#e2483d; --down:#3b7be0; --accent:#4a90d9;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,'Segoe UI','Malgun Gothic',sans-serif; }
+  .app { display:flex; flex-direction:column; height:100vh; }
+
+  header { padding:10px 14px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--card); }
+  header h1 { font-size:16px; margin:0; white-space:nowrap; }
+  .updated { color:var(--sub); font-size:12px; }
+  .controls { display:flex; gap:8px; margin-left:auto; align-items:center; flex-wrap:wrap; }
+
+  select, button, input {
+    background:#12151b; color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:8px 12px; font-size:14px; }
+  select { min-width:180px; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+
+  .body { flex:1; display:flex; min-height:0; }
+
+  /* 사이드바 (종목 목록) */
+  .sidebar { width:220px; border-right:1px solid var(--line); overflow-y:auto;
+    background:var(--card); flex-shrink:0; }
+  .sidebar.hidden { display:none; }
+  .grp { padding:8px 12px 4px; font-size:11px; color:var(--sub); letter-spacing:.04em;
+    text-transform:uppercase; position:sticky; top:0; background:var(--card); }
+  .item { padding:9px 14px; cursor:pointer; border-left:3px solid transparent;
+    display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:14px; }
+  .item:hover { background:#12151b; }
+  .item.active { border-left-color:var(--accent); background:#12151b; font-weight:600; }
+  .item .chg { font-size:12px; font-weight:700; }
+
+  /* 리포트 영역 */
+  .viewer { flex:1; min-width:0; position:relative; }
+  iframe { width:100%; height:100%; border:0; background:var(--bg); }
+  .placeholder { position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; flex-direction:column; gap:12px; color:var(--sub); text-align:center; padding:20px; }
+  .placeholder .big { font-size:44px; }
+
+  .toggle-side { display:none; }
+  @media (max-width:640px) {
+    .sidebar { position:absolute; z-index:10; height:100%; box-shadow:2px 0 12px rgba(0,0,0,.5); }
+    .toggle-side { display:inline-block; }
+    select { min-width:120px; }
+    header h1 { font-size:14px; }
+  }
+
+  .err { color:var(--up); font-size:13px; padding:20px; line-height:1.6; }
+  code { background:#12151b; padding:2px 6px; border-radius:4px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <button class="toggle-side" onclick="toggleSidebar()">☰</button>
+    <h1>📊 포트폴리오 리포트</h1>
+    <span class="updated" id="updated"></span>
+    <div class="controls">
+      <select id="picker" onchange="onPick()"></select>
+      <button onclick="reload()" title="최신 데이터 다시 불러오기">↻ 새로고침</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="viewer">
+      <iframe id="frame" title="리포트"></iframe>
+      <div class="placeholder" id="placeholder">
+        <div class="big">📈</div>
+        <div>종목을 선택하면 리포트가 여기에 표시됩니다</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====== 설정 ======
+// manifest.json 을 우선 사용. 없으면 아래 FALLBACK 목록으로.
+// manifest.json 은 매 실행마다 자동 생성됨 (report_writer.write_manifest).
+const DATA_BASE = "data/latest";       // 리포트 위치 (뷰어 파일 기준 상대경로)
+const MANIFEST = "data/latest/manifest.json";
+
+// manifest 없을 때를 대비한 폴백 (수동 갱신 가능)
+const FALLBACK = [
+  { name:"KOSPI", code:"KS11", group:"지수" },
+  { name:"KOSDAQ", code:"KQ11", group:"지수" },
+];
+
+let items = [];
+let current = null;
+
+function fileFor(it){
+  const safe = it.name.replaceAll(" ","-").replaceAll("/","-");
+  return `${DATA_BASE}/${it.code}_${safe}.html`;
+}
+
+async function loadManifest(){
+  try {
+    const r = await fetch(MANIFEST + "?t=" + Date.now(), {cache:"no-store"});
+    if (!r.ok) throw new Error("manifest 없음");
+    const j = await r.json();
+    items = j.items || [];
+    document.getElementById("updated").textContent =
+      j.updated ? "· 갱신 " + j.updated : "";
+  } catch(e) {
+    items = FALLBACK;
+    document.getElementById("updated").textContent = "· (manifest 미발견, 폴백 목록)";
+  }
+  render();
+}
+
+function render(){
+  // 드롭다운
+  const picker = document.getElementById("picker");
+  picker.innerHTML = '<option value="">— 종목 선택 —</option>';
+  // 사이드바
+  const side = document.getElementById("sidebar");
+  side.innerHTML = "";
+
+  const groups = {};
+  items.forEach((it, i) => {
+    const g = it.group || "종목";
+    (groups[g] = groups[g] || []).push({...it, i});
+  });
+
+  Object.keys(groups).forEach(g => {
+    const gh = document.createElement("div");
+    gh.className = "grp"; gh.textContent = g;
+    side.appendChild(gh);
+
+    const og = document.createElement("optgroup");
+    og.label = g;
+
+    groups[g].forEach(it => {
+      // 사이드바 아이템
+      const el = document.createElement("div");
+      el.className = "item";
+      el.dataset.i = it.i;
+      const chg = (it.chg ?? null);
+      const chgTxt = chg===null ? "" :
+        `<span class="chg" style="color:${chg>0?'var(--up)':chg<0?'var(--down)':'var(--sub)'}">${chg>0?'+':''}${chg}%</span>`;
+      el.innerHTML = `<span>${it.name}</span>${chgTxt}`;
+      el.onclick = () => select(it.i);
+      side.appendChild(el);
+
+      // 드롭다운 옵션
+      const opt = document.createElement("option");
+      opt.value = it.i; opt.textContent = `${it.name}${chg!==null?`  (${chg>0?'+':''}${chg}%)`:''}`;
+      og.appendChild(opt);
+    });
+    picker.appendChild(og);
+  });
+}
+
+function select(i){
+  const it = items[i];
+  if (!it) return;
+  current = i;
+  document.getElementById("picker").value = i;
+  document.querySelectorAll(".item").forEach(el =>
+    el.classList.toggle("active", el.dataset.i == i));
+  const frame = document.getElementById("frame");
+  const ph = document.getElementById("placeholder");
+  ph.style.display = "none";
+  frame.src = fileFor(it) + "?t=" + Date.now();
+  frame.onerror = () => {
+    ph.style.display = "flex";
+    ph.innerHTML = `<div class="err">리포트를 불러올 수 없습니다.<br><code>${fileFor(it)}</code><br>파일이 아직 생성되지 않았을 수 있습니다.</div>`;
+  };
+  // 모바일에서 선택 후 사이드바 닫기
+  if (window.innerWidth <= 640) document.getElementById("sidebar").classList.add("hidden");
+}
+
+function onPick(){
+  const v = document.getElementById("picker").value;
+  if (v !== "") select(parseInt(v));
+}
+function reload(){ loadManifest().then(()=>{ if(current!==null) select(current); }); }
+function toggleSidebar(){ document.getElementById("sidebar").classList.toggle("hidden"); }
+
+loadManifest();
+</script>
+</body>
+</html>

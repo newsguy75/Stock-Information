@@ -460,3 +460,33 @@ def write_day_index(analyses: list[dict], now: dt.datetime | None = None) -> str
     with open(ipath, "w", encoding="utf-8") as f:
         f.write(doc)
     return ipath
+
+
+def write_manifest(analyses: list[dict], now: dt.datetime | None = None) -> str:
+    """뷰어(viewer.html)가 읽을 종목 목록 manifest.json 을 data/latest 에 생성.
+    지수는 group='지수', 나머지는 섹터별로 묶지 않고 '보유종목'."""
+    now = now or dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=7)
+    latest = os.path.join(DATA_ROOT, "latest")
+    os.makedirs(latest, exist_ok=True)
+
+    items = []
+    for a in analyses:
+        is_index = a.get("is_index", False)
+        items.append({
+            "name": a["name"],
+            "code": a["code"],
+            "chg": a.get("change_pct"),
+            "group": "지수" if is_index else "보유종목",
+            "verdict": a.get("daily_verdict", {}).get("verdict", ""),
+            "bear": bool(a.get("bear_warnings", {}).get("has_warning")),
+        })
+
+    manifest = {
+        "updated": now.strftime("%Y-%m-%d %H:%M") + " (VN)",
+        "count": len(items),
+        "items": items,
+    }
+    mpath = os.path.join(latest, "manifest.json")
+    with open(mpath, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    return mpath

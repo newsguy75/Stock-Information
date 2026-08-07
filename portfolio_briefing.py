@@ -28,7 +28,7 @@ import pandas as pd
 import data_feed as feed
 from signals import to_weekly, to_monthly
 from analysis_engine import analyze_stock
-from report_writer import save_report, write_day_index, _dir_color
+from report_writer import save_report, write_day_index, write_manifest, _dir_color
 from market_index import build_market_summary
 
 HOLDINGS_PATH = os.environ.get("HOLDINGS_PATH", "holdings.json")
@@ -54,8 +54,8 @@ def _chg_icon(chg: float) -> str:
     return "⚪"
 
 
-def build_stock_message(analysis: dict) -> str:
-    """종목 1개 카톡 메시지 (스크린샷 포맷).
+def build_stock_message(analysis: dict, is_index: bool = False) -> str:
+    """종목/지수 1개 카톡 메시지 (스크린샷 포맷).
     🔴 종목명 가격(등락%) [판정 +score] [판정] 핵심시그널 나열
     """
     name = analysis["name"]
@@ -63,6 +63,7 @@ def build_stock_message(analysis: dict) -> str:
     chg = analysis["change_pct"]
     icon = _chg_icon(chg)
     price = analysis["price"]
+    prefix = "📈 " if is_index else ""
 
     # 하락 경고 우선 표기 (일봉 하락다이버전스/쌍봉/데드캣바운스)
     bear = analysis.get("bear_warnings", {})
@@ -130,6 +131,24 @@ def build_stock_message(analysis: dict) -> str:
         if "상승" in d5t:
             neg_sigs.append("공매도 5일↑")
 
+    # 1시간봉 요약 라인 (장/중/단 스토캐 방향 + 다이버전스)
+    hourly_line = ""
+    hf = analysis["stoch_frames"].get("hourly", {})
+    h_parts = []
+    for k in ["장기", "중기", "단기"]:
+        node = hf.get(k, {})
+        if node.get("ok"):
+            dsym = {"상승": "▲", "하락": "▼", "보합": "―"}.get(node["direction"], "")
+            h_parts.append(f"{k}{dsym}")
+    if h_parts:
+        hourly_line = "1H: " + " ".join(h_parts)
+        # 1H 다이버전스 부기
+        hd = analysis["divergence"].get("1H", {})
+        if hd.get("found"):
+            hourly_line += (" 🔴상승div" if hd["type"] == "상승" else " 🔵하락div")
+    else:
+        hourly_line = "1H: 데이터 없음"
+
     # 호재 위주로 표기, 악재는 뒤에 ⚠로
     line2 = f"[{tag}]"
     if pos_sigs:
@@ -137,18 +156,25 @@ def build_stock_message(analysis: dict) -> str:
     if neg_sigs:
         line2 += (" ⚠" if pos_sigs else " ") + ", ".join(neg_sigs[:3])
     if not pos_sigs and not neg_sigs:
-        # 다이버전스/크로스 같은 이벤트가 없으면 판정 근거를 대신 표시
         reasons = dv.get("reasons", [])
         line2 += " " + (", ".join(reasons[:4]) if reasons else "특이신호 없음")
 
-    return (f"{bear_line}{icon} {name} {price:,}({chg:+.1f}%) [{tag} {score:+d}]\n{line2}")
+    price_txt = f"{price:,.2f}" if is_index else f"{price:,}"
+    return (f"{bear_line}{prefix}{icon} {name} {price_txt}({chg:+.1f}%) [{tag} {score:+d}]\n"
+            f"{line2}\n{hourly_line}")
 
 
-def process_stock(name: str, code: str, now_vn: dt.datetime, demo: bool = False):
+def process_stock(name: str, code: str, now_vn: dt.datetime, demo: bool = False,
+                  is_index: bool = False):
     if demo:
         daily = feed.dummy_daily(seed=abs(hash(code)) % 1000)
         monthly_src = feed.dummy_monthly_source(seed=abs(hash(code)) % 1000)
         hourly = feed.dummy_hourly(seed=abs(hash(code)) % 1000)
+    elif is_index:
+        # 지수는 FDR 지수 심볼로 수집, 1시간봉/월봉소스도 동일 심볼
+        daily = feed.fetch_index_daily(code, years=DAILY_YEARS)
+        monthly_src = feed.fetch_index_daily(code, years=MONTHLY_YEARS)
+        hourly = feed.fetch_hourly(code)  # 지수 분봉은 네이버 미지원 가능 → 빈 DF 폴백
     else:
         daily = feed.fetch_daily(code, years=DAILY_YEARS)
         monthly_src = feed.fetch_monthly_source(code, years=MONTHLY_YEARS)
@@ -159,7 +185,8 @@ def process_stock(name: str, code: str, now_vn: dt.datetime, demo: bool = False)
 
     monthly = to_monthly(monthly_src) if len(monthly_src) >= 250 else to_monthly(daily)
 
-    analysis = analyze_stock(name, code, daily, monthly, hourly, demo=demo)
+    analysis = analyze_stock(name, code, daily, monthly, hourly, demo=demo,
+                             is_index=is_index)
     saved = save_report(analysis, now_vn)
     analysis["_html_path"] = saved.get("html")
 
@@ -285,8 +312,27 @@ def main():
     now_vn = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=7)
     pages_base = os.environ.get("PAGES_BASE_URL")
 
-    # --- 1) 시황 요약 (KOSPI/KOSDAQ) ---
-    market_text = build_market_summary(demo=args.demo)
+    # --- 1) 지수(KOSPI/KOSDAQ)를 개별 리포트로 분석 ---
+    INDICES = [{"name": "KOSPI", "code": "KS11"},
+               {"name": "KOSDAQ", "code": "KQ11"}]
+    index_analyses = []
+    index_messages = []
+    for ix in INDICES:
+        try:
+            a, _l, _al = process_stock(ix["name"], ix["code"], now_vn,
+                                       demo=args.demo, is_index=True)
+        except Exception as e:
+            a = None
+            index_messages.append((f"● {ix['name']}: 오류 {e}", None))
+        if a:
+            index_analyses.append(a)
+            msg = build_stock_message(a, is_index=True)
+            safe = ix["name"]
+            link = (f"{pages_base}/data/latest/{ix['code']}_{safe}.html"
+                    if pages_base else None)
+            index_messages.append((msg, link))
+        if not args.demo:
+            time.sleep(0.4)
 
     # --- 2) 종목별 분석 + 저장 + 개별 메시지 준비 ---
     analyses = []
@@ -311,46 +357,61 @@ def main():
         if not args.demo:
             time.sleep(0.4)
 
-    if analyses:
-        write_day_index(analyses, now_vn)
+    # 인덱스 페이지엔 지수+종목 모두 포함
+    all_analyses = index_analyses + analyses
+    if all_analyses:
+        write_day_index(all_analyses, now_vn)
+        write_manifest(all_analyses, now_vn)   # 뷰어용 종목 목록
 
-    # 첨부용 HTML 파일 경로 수집 (+ 그날 index)
-    html_files = [a["_html_path"] for a in analyses if a.get("_html_path")]
+    # 첨부용 HTML 파일 경로 수집 (지수 + 종목 + 그날 index)
+    html_files = [a["_html_path"] for a in (index_analyses + analyses) if a.get("_html_path")]
     index_path = os.path.join(os.environ.get("DATA_ROOT", "data"),
                               now_vn.strftime("%Y-%m-%d"), "index.html")
     if os.path.exists(index_path):
         html_files = [index_path] + html_files
 
+    # 짧은 시황 헤더 (지수 메시지 앞에 1줄)
+    market_header = f"🏛 시황 (VN {now_vn:%m/%d %H:%M})"
+
     # --- 3) 출력 or 전송 ---
     if args.dry_run or args.demo:
-        print(market_text)
+        print(market_header)
         print()
+        print("=== 지수 (개별) ===")
+        for msg, link in index_messages:
+            print(msg)
+            if link:
+                print(f"  🔗 {link}")
+            print()
+        print("=== 보유 종목 (개별) ===")
         for msg, link in stock_messages:
             print(msg)
             if link:
                 print(f"  🔗 {link}")
             print()
         print(f"[저장 완료] data/ 폴더 · HTML {len(html_files)}개")
-        # 이메일 미리보기 (전송은 안 함)
         if os.environ.get("GMAIL_USER"):
             print("[dry-run] GMAIL_USER 설정됨 — 실행 시 이메일 발송됨")
         return
 
-    # 카카오: 시황요약 먼저 → 종목별 개별
+    # 카카오: 시황 헤더 → 지수 개별 → 종목 개별
     token = refresh_access_token()
     if token:
-        send_kakao_message(market_text, token)
+        send_kakao_message(market_header, token)
         time.sleep(0.5)
-        for msg, link in stock_messages:
+        for msg, link in index_messages:      # KOSPI, KOSDAQ 개별
+            send_kakao_message(msg, token, link_url=link)
+            time.sleep(0.5)
+        for msg, link in stock_messages:       # 종목 개별
             send_kakao_message(msg, token, link_url=link)
             time.sleep(0.5)
     else:
         print("[error] 카카오 토큰 없음 — 카톡 전송 skip")
 
-    # 이메일: HTML 리포트 첨부 발송 (기존 스케줄러에서 함께 실행)
+    # 이메일: HTML 리포트 첨부 발송 (지수 리포트도 포함)
     try:
         from emailer import send_email
-        send_email(analyses, market_text, html_files, now_vn)
+        send_email(index_analyses + analyses, market_header, html_files, now_vn)
     except Exception as e:
         print(f"[warn] 이메일 발송 예외: {e}")
 
