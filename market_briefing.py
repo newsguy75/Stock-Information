@@ -29,9 +29,9 @@ import pandas as pd
 # ======================================================================
 US_INDEX_MAP = {
     "다우": "DJI",           # Dow Jones
-    "나스닥": "IXIC",         # Nasdaq
+    "나스닥": "IXIC",         # Nasdaq Composite
     "S&P500": "US500",       # S&P 500
-    "SOX 반도체": "SOX",     # Philadelphia Semiconductor
+    # "SOX 반도체": FDR 미지원, 필요 시 SOXX ETF로 대체
 }
 
 US_STOCKS = [
@@ -44,10 +44,9 @@ US_STOCKS = [
 ]
 
 COMMODITIES = {
-    "WTI 유가": "CL=F",
-    "10년 국채": "US10YT=X",
+    # FDR 지원 심볼만 사용. Yahoo 심볼(=F, =X, -Y.NYB)는 미지원
     "원달러": "USD/KRW",
-    "달러인덱스": "DX-Y.NYB",
+    # WTI 유가·국채·달러인덱스는 FDR 미지원 → 네이버 크롤링 폴백 필요
 }
 
 
@@ -56,27 +55,92 @@ def _fetch_us_symbol(symbol: str, days: int = 5) -> dict | None:
     try:
         import FinanceDataReader as fdr
         end = dt.date.today()
-        start = end - dt.timedelta(days=days)
+        start = end - dt.timedelta(days=days + 3)  # 주말 감안 여유
         df = fdr.DataReader(symbol, start, end)
         if len(df) < 2:
+            print(f"[warn] {symbol}: 데이터 {len(df)}개")
             return None
         df.columns = [c.lower() for c in df.columns]
+        if "close" not in df.columns:
+            print(f"[warn] {symbol}: close 컬럼 없음. 컬럼={list(df.columns)}")
+            return None
         last = float(df["close"].iloc[-1])
         prev = float(df["close"].iloc[-2])
+        if prev == 0 or last == 0:
+            return None
         chg = (last - prev) / prev * 100
-        return {"close": last, "change_pct": round(chg, 2),
-                "date": str(df.index[-1].date())}
+        r = {"close": last, "change_pct": round(chg, 2),
+             "date": str(df.index[-1].date())}
+        print(f"[US심볼] {symbol}: {last:.2f} ({chg:+.2f}%) [{r['date']}]")
+        return r
     except Exception as e:
-        return {"error": str(e)}
+        print(f"[warn] {symbol}: {e}")
+        return None
+
+
+def _fetch_yahoo_quote(symbol: str) -> dict | None:
+    """Yahoo Finance quote API로 심볼 조회 (FDR이 지원하지 않는 심볼 대응).
+    예: CL=F (WTI), ^TNX (10년 국채), DX-Y.NYB (달러인덱스), ^SOX (필라반도체)
+    """
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
+    try:
+        r = requests.get(url, timeout=8,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        j = r.json()
+        results = j.get("quoteResponse", {}).get("result", [])
+        if not results:
+            return None
+        d = results[0]
+        last = d.get("regularMarketPrice")
+        chg_pct = d.get("regularMarketChangePercent")
+        if last is None:
+            return None
+        return {"close": float(last),
+                "change_pct": round(float(chg_pct or 0), 2),
+                "date": str(dt.date.today())}
+    except Exception as e:
+        print(f"[warn] Yahoo {symbol}: {e}")
+        return None
+
+
+def fetch_commodities() -> dict:
+    """원자재/금리/환율. FDR + Yahoo 폴백 조합."""
+    out = {}
+    # FDR로 원달러
+    for name, sym in COMMODITIES.items():
+        r = _fetch_us_symbol(sym)
+        if r:
+            out[name] = r
+        time.sleep(0.1)
+
+    # Yahoo로 나머지 (FDR 미지원)
+    yahoo_targets = [
+        ("WTI 유가", "CL=F"),
+        ("10년 국채", "^TNX"),
+        ("달러인덱스", "DX-Y.NYB"),
+    ]
+    for name, sym in yahoo_targets:
+        if name in out:
+            continue
+        r = _fetch_yahoo_quote(sym)
+        if r:
+            out[name] = r
+        time.sleep(0.1)
+    return out
 
 
 def fetch_us_indices() -> dict:
-    """미국 지수 4종 전일 마감."""
+    """미국 지수 (FDR 3개 + Yahoo SOX)."""
     out = {}
     for name, sym in US_INDEX_MAP.items():
         r = _fetch_us_symbol(sym)
-        if r and "close" in r:
+        if r:
             out[name] = r
+    # SOX는 Yahoo로
+    sox = _fetch_yahoo_quote("^SOX")
+    if sox:
+        out["SOX 반도체"] = sox
     return out
 
 
@@ -85,18 +149,7 @@ def fetch_us_stocks() -> dict:
     out = {}
     for name, sym in US_STOCKS:
         r = _fetch_us_symbol(sym)
-        if r and "close" in r:
-            out[name] = r
-        time.sleep(0.1)   # rate limit 방지
-    return out
-
-
-def fetch_commodities() -> dict:
-    """원자재/금리/환율."""
-    out = {}
-    for name, sym in COMMODITIES.items():
-        r = _fetch_us_symbol(sym)
-        if r and "close" in r:
+        if r:
             out[name] = r
         time.sleep(0.1)
     return out
