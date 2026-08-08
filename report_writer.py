@@ -125,6 +125,14 @@ def build_html(analysis: dict) -> str:
     # 2. 통합 방향성 예측 (다이버전스 + 스토캐 3구간 합산 → 하나의 결론)
     fc = a.get("forecast", {})
     s = a["stoch_frames"]
+    if not fc:
+        # analysis_engine이 구버전이라 forecast가 없을 때 즉석 계산 (파일 부분교체 대비)
+        try:
+            from analysis_engine import build_integrated_forecast
+            fc = build_integrated_forecast(a.get("divergence", {}), s, a.get("ma"))
+        except Exception as e:
+            print(f"[warn] forecast 즉석계산 실패: {e}")
+            fc = {}
     if fc.get("ok"):
         vcol = {"up": C_UP, "down": C_DOWN}.get(fc.get("vcolor"), C_SUB)
 

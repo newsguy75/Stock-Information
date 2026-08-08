@@ -1032,6 +1032,150 @@ def build_monthly_verdict(stoch: dict, div: dict, monthly: pd.DataFrame) -> dict
 # ======================================================================
 # 종목 1개 전체 분석 조립
 # ======================================================================
+def build_integrated_forecast(div: dict, stoch: dict, ma: dict = None) -> dict:
+    """다이버전스 + 스토캐 3구간(단/중/장) × 2프레임(일/월)을 통합해
+    '시점별 방향 예측' 하나의 결론을 낸다.
+
+    해석 원칙:
+      - 장기(20-10-10) = 대세(메인 트렌드). 여기가 하방이면 단기 GC는 기술적 반등.
+      - 중기(10-5-5)  = 스윙 사이클. 신뢰도 가장 높음.
+      - 단기(5-3-3)   = 타이밍용. 휩소 많아 단독 신호로는 약함.
+      - 다이버전스는 추세 전환 선행 신호로 가중치 높게.
+    """
+    horizons = []   # 시점별 예측
+    score = 0.0
+    notes = []
+
+    # 시점 정의: (표시명, 기간, 프레임키, 구간키, 가중치)
+    HZ = [
+        ("대세",     "3~6개월", "monthly", "장기", 4.0),
+        ("중기추세", "1~3개월", "monthly", "중기", 3.0),
+        ("스윙",     "3~6주",   "daily",   "장기", 3.0),
+        ("스윙단기", "1~3주",   "daily",   "중기", 2.5),
+        ("타이밍",   "수일",     "daily",   "단기", 1.0),
+    ]
+
+    DIR_VAL = {"상승": 1, "보합": 0, "하락": -1}
+
+    for label, period, fkey, skey, w in HZ:
+        node = (stoch.get(fkey) or {}).get(skey, {})
+        if not node.get("ok"):
+            horizons.append({"label": label, "period": period,
+                             "direction": "판단불가", "detail": "데이터 부족",
+                             "weight": w})
+            continue
+        d = node.get("direction", "보합")
+        z = node.get("zone", "중립")
+        c = node.get("cross")
+        k = node.get("k")
+
+        # 기본 점수
+        s = DIR_VAL.get(d, 0) * w
+        # 크로스 보정 (같은 방향이면 강화)
+        if c == "골든크로스":
+            s += 0.5 * w if d != "하락" else 0
+        elif c == "데드크로스":
+            s -= 0.5 * w if d != "상승" else 0
+        # 과매도 반등 / 과매수 하락은 신뢰 가산
+        if z == "과매도" and d == "상승":
+            s += 0.3 * w
+        elif z == "과매수" and d == "하락":
+            s -= 0.3 * w
+        score += s
+
+        detail_bits = [f"K{k}", z]
+        if c:
+            detail_bits.append(c)
+        horizons.append({"label": label, "period": period, "direction": d,
+                         "detail": " · ".join(str(b) for b in detail_bits),
+                         "zone": z, "cross": c, "k": k, "weight": w})
+
+    # 다이버전스 반영 (전환 선행 신호 → 가중치 큼)
+    div_notes = []
+    for frame, w in [("월봉", 4.0), ("일봉", 3.0)]:
+        d = div.get(frame, {})
+        if d.get("ok") and d.get("found"):
+            t = d.get("type")
+            if t == "상승":
+                score += w
+                div_notes.append(f"{frame} 상승다이버전스[{d.get('to_date','')}] → 반등 선행신호")
+            elif t == "하락":
+                score -= w
+                div_notes.append(f"{frame} 하락다이버전스[{d.get('to_date','')}] → 조정 선행신호")
+
+    # --- 대세 필터 (사용자 규칙: 장기 하방이면 단기 GC는 기술적 반등) ---
+    mon_long = (stoch.get("monthly") or {}).get("장기", {})
+    day_long = (stoch.get("daily") or {}).get("장기", {})
+    main_trend = None
+    if mon_long.get("ok"):
+        main_trend = mon_long.get("direction")
+
+    filter_note = ""
+    if main_trend == "하락" and score > 0:
+        score *= 0.4   # 대세 하락 중 상승신호는 크게 감쇠
+        filter_note = ("월봉 장기(대세)가 하방 → 단기·중기 상승신호는 "
+                       "추세반전이 아닌 '기술적 반등' 가능성. 매수 보류 또는 짧은 단타로만 대응.")
+    elif main_trend == "상승" and score < 0:
+        score *= 0.5
+        filter_note = ("월봉 장기(대세)가 상방 → 단기 하락신호는 "
+                       "추세이탈이 아닌 '눌림목'일 확률. 지지선 확인 후 분할 접근 유효.")
+
+    # --- 최종 판정 ---
+    if score >= 4.0:
+        verdict, vcolor = "상승 예상", "up"
+    elif score >= 1.5:
+        verdict, vcolor = "완만한 상승 예상", "up"
+    elif score > -1.5:
+        verdict, vcolor = "보합 예상", "flat"
+    elif score > -4.0:
+        verdict, vcolor = "완만한 하락 예상", "down"
+    else:
+        verdict, vcolor = "하락 예상", "down"
+
+    # --- 매수/매도 조건 체크 (사용자 제시 3단 조건) ---
+    setup = None
+    d_long = (stoch.get("daily") or {}).get("장기", {})
+    d_mid = (stoch.get("daily") or {}).get("중기", {})
+    d_short = (stoch.get("daily") or {}).get("단기", {})
+    if all(x.get("ok") for x in [d_long, d_mid, d_short]):
+        long_ok = d_long.get("direction") == "상승" or d_long.get("zone") == "과매도"
+        mid_ok = d_mid.get("direction") in ("상승", "보합")
+        short_gc = d_short.get("cross") == "골든크로스" or (
+            d_short.get("direction") == "상승" and d_short.get("zone") == "과매도")
+        if long_ok and mid_ok and short_gc:
+            if main_trend == "하락":
+                # 대세(월봉 장기)가 하방이면 일봉 3단 조건이 갖춰져도 신뢰도 하향
+                setup = ("⚠️ 일봉 3단 매수조건은 성립(장기 상방/바닥 + 중기 상승 + 단기 GC)이나, "
+                         "월봉 대세가 하방 → 추세반전 아닌 반등 구간. 짧은 스윙으로만 대응.")
+            else:
+                setup = ("✅ 3단 매수조건 성립 — 장기 상방/바닥 + 중기 상승 + 단기 골든크로스. "
+                         "신뢰도 높은 매수 타점.")
+        elif d_long.get("direction") == "하락" and short_gc:
+            setup = ("⚠️ 단기 골든크로스이나 일봉 장기 하방 — 기술적 반등 구간. "
+                     "매수 보류 또는 짧은 단타만.")
+
+    # --- 시점별 서술 조립 ---
+    timeline = []
+    for h in horizons:
+        if h["direction"] == "판단불가":
+            continue
+        arrow = {"상승": "↗", "하락": "↘", "보합": "→"}.get(h["direction"], "→")
+        timeline.append(f"{h['period']}({h['label']}) {arrow} {h['direction']}")
+
+    return {
+        "ok": True,
+        "score": round(score, 1),
+        "verdict": verdict,
+        "vcolor": vcolor,
+        "main_trend": main_trend,
+        "horizons": horizons,
+        "div_notes": div_notes,
+        "filter_note": filter_note,
+        "setup": setup,
+        "timeline": timeline,
+    }
+
+
 def analyze_stock(name: str, code: str, daily: pd.DataFrame,
                    monthly: pd.DataFrame, hourly: pd.DataFrame,
                    demo: bool = False, is_index: bool = False) -> dict:
@@ -1109,6 +1253,8 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
         "hourly": (str(pd.Timestamp(hourly.index[-1])) if hourly is not None and len(hourly) else ""),
     }
 
+    forecast = build_integrated_forecast(div, stoch, ma)
+
     return {
         "name": name, "code": code,
         "price": (round(last_close, 2) if is_index else round(last_close)),
@@ -1117,8 +1263,9 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "data_freshness": data_freshness,   # 각 프레임 마지막 봉 날짜
         "bear_warnings": bear,      # 2-B 하락 경고 (최우선)
-        "divergence": div,          # 2번
-        "stoch_frames": stoch,      # 3번
+        "forecast": forecast,       # 2번 통합(다이버전스+방향성 → 시점별 예측)
+        "divergence": div,          # (원자료 보존)
+        "stoch_frames": stoch,      # (원자료 보존)
         "ma": ma,                   # 4번
         "pullback": pullback,       # 4-B 눌림목 매수
         "supply_demand": supply,    # 5번
