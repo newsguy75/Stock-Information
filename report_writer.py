@@ -87,6 +87,24 @@ def _section(title: str, inner: str) -> str:
     return f'<div class="sec"><div class="sec-h">{title}</div>{inner}</div>'
 
 
+def _section_if(title: str, inner: str, has_content: bool = True) -> str:
+    """내용이 없으면 섹션 자체를 숨김."""
+    if not has_content or not inner or not inner.strip():
+        return ""
+    return _section(title, inner)
+
+
+def _fold(label: str, detail: str, open_: bool = False) -> str:
+    """클릭하면 펼쳐지는 상세 블록. 기본은 접힘.
+    JS 없이 <details>로 구현 — iframe 안에서도 동작."""
+    if not detail or not detail.strip():
+        return ""
+    op = " open" if open_ else ""
+    return (f'<details class="fold"{op}>'
+            f'<summary class="fold-s">{label}</summary>'
+            f'<div class="fold-b">{detail}</div></details>')
+
+
 def build_html(analysis: dict) -> str:
     a = analysis
     chg = a["change_pct"]
@@ -133,7 +151,92 @@ def build_html(analysis: dict) -> str:
         except Exception as e:
             print(f"[warn] forecast 즉석계산 실패: {e}")
             fc = {}
-    if fc.get("ok"):
+    if fc.get("ok") and fc.get("rows") is not None:
+        # ---- 신규 엔진 (trend_judge): 조정 vs 꺾임 ----
+        phase = fc.get("phase", "")
+        pcol = (C_UP if "조정" in phase and "꺾임" not in phase
+                else C_DOWN if "꺾임" in phase else C_SUB)
+        vcol = {"up": C_UP, "down": C_DOWN}.get(fc.get("vcolor"), C_SUB)
+
+        fc_body = (
+            f'<div class="fc-verdict" style="border-color:{pcol}">'
+            f'<div class="fc-v" style="color:{pcol}">{esc(phase)}</div>'
+            f'<div class="fc-narr">{esc(fc.get("narrative",""))}</div>'
+            f'<div class="fc-s" style="margin-top:6px">{esc(fc.get("phase_note",""))}</div>'
+            f'</div>'
+        )
+
+        # 우호 / 주의 요인
+        pos, neg = fc.get("positives") or [], fc.get("cautions") or []
+
+        def _fac_txt(x):
+            if isinstance(x, dict):
+                tf = f' <span class="sub" style="font-size:11px">{esc(x.get("tf",""))}</span>'
+                return f'{esc(x.get("item",""))} — {esc(x.get("state",""))}{tf}'
+            return esc(str(x))
+
+        if pos or neg:
+            cols = ''
+            if pos:
+                cols += ('<div class="fac"><div class="fac-h" style="color:' + C_UP + '">▲ 우호 요인</div>'
+                         + "".join(f'<div class="fac-i">{_fac_txt(x)}</div>' for x in pos) + '</div>')
+            if neg:
+                cols += ('<div class="fac"><div class="fac-h" style="color:' + C_DOWN + '">▼ 주의 요인</div>'
+                         + "".join(f'<div class="fac-i">{_fac_txt(x)}</div>' for x in neg) + '</div>')
+            fc_body += f'<div class="fac-wrap">{cols}</div>'
+
+        # 대응 가이드
+        if fc.get("action"):
+            fc_body += f'<div class="fc-note">🎯 {esc(fc["action"])}</div>'
+
+        # 시점별 전망
+        tl_rows = []
+        for t in fc.get("timeline", []):
+            dcol = _dir_color(t["dir"])
+            arrow = {"상승": "↗", "하락": "↘", "보합": "→"}.get(t["dir"], "→")
+            tl_rows.append(
+                f'<tr><td class="hz-p">{esc(t["period"])}</td>'
+                f'<td class="hz-l">{esc(t["label"])}</td>'
+                f'<td class="hz-d" style="color:{dcol}"><b>{arrow} {esc(t["dir"])}</b></td>'
+                f'<td class="hz-x sub">{esc(t["basis"])}</td></tr>')
+        if tl_rows:
+            fc_body += _fold('🕒 시점별 전망 보기',
+                        '<table class="hz-tbl"><thead><tr>'
+                        '<th>시점</th><th>구간</th><th>방향</th><th>근거</th>'
+                        '</tr></thead><tbody>' + "".join(tl_rows) + '</tbody></table>')
+
+        # 판단 근거 체크리스트 (점수 대신 방향 마커)
+        ck_rows = []
+        for r in fc.get("rows", []):
+            p = r.get("pts", 0)
+            if p > 0:
+                mk, mcol = "▲", C_UP
+            elif p < 0:
+                mk, mcol = "▼", C_DOWN
+            else:
+                mk, mcol = "–", C_SUB
+            ck_rows.append(
+                f'<tr><td style="padding:5px 8px;width:22px;text-align:center;'
+                f'color:{mcol};font-weight:700">{mk}</td>'
+                f'<td style="padding:5px 8px;font-weight:600">{esc(r["item"])}'
+                f'<span class="sub" style="font-size:11px"> {esc(r.get("tf",""))}</span></td>'
+                f'<td style="padding:5px 8px">{esc(r["state"])}</td>'
+                f'<td style="padding:5px 8px" class="sub">{esc(r.get("note",""))}</td></tr>')
+        if ck_rows:
+            fc_body += _fold('✅ 자세한 판단 근거 보기 (조정 vs 꺾임 체크리스트)',
+                        '<table class="hz-tbl"><thead><tr>'
+                        '<th></th><th>기준</th><th>상태</th><th>비고</th>'
+                        '</tr></thead><tbody>' + "".join(ck_rows) + '</tbody></table>')
+
+        # 스토캐 3구간 차트
+        st_uri = (a.get("charts") or {}).get("stoch_triple")
+        if st_uri:
+            fc_body += _fold('📈 스토캐 3구간 차트 보기 (다이버전스 · 쌍바닥/쌍봉)',
+                        f'<div class="chart-full"><img src="{st_uri}" alt="스토캐 3구간"></div>')
+
+        div_html = _section("2. 추세 판정 — 조정 vs 꺾임 (시장구조·EMA·다이버전스·거래량·피보나치 종합)", fc_body)
+
+    elif fc.get("ok"):
         vcol = {"up": C_UP, "down": C_DOWN}.get(fc.get("vcolor"), C_SUB)
 
         # (a) 최종 결론 배너
@@ -232,9 +335,16 @@ def build_html(analysis: dict) -> str:
             ma_inner += f'<div class="row"><span class="k">중기크로스</span><span class="v" style="color:{_dir_color(ma["forecast60"])}">{esc(ma["forecast60"])}</span></div>'
         if ma.get("note"):
             ma_inner += f'<div class="row"><span class="k">비고</span><span class="v sub">{esc(ma["note"])}</span></div>'
+        # 핵심 한 줄 + 상세 접기
+        ma_head = (
+            f'<div class="hl"><b style="color:{_dir_color(ma["state"])}">{esc(ma["state"])}</b>'
+            f' · 현재가 {ma["price"]:,}원, {esc(ma["position"])}'
+            + (f' · {esc(ma["forecast"])}' if ma.get("forecast") else '')
+            + '</div>')
+        ma_inner = ma_head + _fold("📐 이평선 상세 보기", ma_inner)
     else:
-        ma_inner = '<div class="row"><span class="v na">이평 데이터 부족</span></div>'
-    ma_html = _section("4. 이평선 분석 (5·20·60일선 + 방향예측)", ma_inner)
+        ma_inner = ""
+    ma_html = _section_if("4. 이평선 분석 (5·20·60일선 + 방향예측)", ma_inner)
 
     # 4-B. 눌림목 매수
     pb = a.get("pullback", {})
@@ -253,14 +363,13 @@ def build_html(analysis: dict) -> str:
                      f'<span class="v" style="color:{conf_col}">{pb["confidence"]}</span></div>')
         if pb.get("opinion"):
             pb_inner += f'<div class="row"><span class="k">기술적 의견</span><span class="v sub">{esc(pb["opinion"])}</span></div>'
-    elif pb.get("ok"):
-        pb_inner = (f'<div class="row"><span class="k">현재</span>'
-                    f'<span class="v sub">{esc(pb.get("status",""))}</span></div>')
-        if pb.get("opinion"):
-            pb_inner += f'<div class="row"><span class="k">기술적 의견</span><span class="v sub">{esc(pb["opinion"])}</span></div>'
+        pb_head = (f'<div class="hl">눌림 신호 {len(pb["signals"])}건 · '
+                   f'신뢰도 <b style="color:{conf_col}">{pb["confidence"]}</b></div>')
+        pb_inner = pb_head + _fold("🎯 눌림목 진입·손절 상세 보기", pb_inner)
     else:
-        pb_inner = '<div class="row"><span class="v na">눌림목 데이터 부족</span></div>'
-    pb_html = _section("4-B. 눌림목 매수 (5·10·20일선 지지터치 + 손절가)", pb_inner)
+        # 신호 없으면 섹션 자체를 숨김 (인사이트 없음)
+        pb_inner = ""
+    pb_html = _section_if("4-B. 눌림목 매수 (5·10·20일선 지지터치 + 손절가)", pb_inner)
 
     # 5. 수급 (5·20·60일 + 비중)
     sup = a["supply_demand"]
@@ -326,7 +435,14 @@ def build_html(analysis: dict) -> str:
         else:
             parts.append(f'<div class="row"><span class="v na">투자자 매매 데이터 없음{" ("+esc(infl.get("err",""))+")" if infl.get("err") else ""}</span></div>')
         sup_inner = "".join(parts)
-    sup_html = _section("5. 거래량·수급 (외인·기관·개인 5·20·60일 + 비중)", sup_inner) if not a.get("is_index") else _section("5. 시장 현황 (상승/하락/상하한가 + 투자자 매매)", sup_inner)
+    if sup_inner:
+        _t5 = ("5. 시장 현황 (상승/하락/상하한가 + 투자자 매매)" if a.get("is_index")
+               else "5. 거래량·수급 (외인·기관·개인 5·20·60일 + 비중)")
+        _sum5 = sup.get("summary") if isinstance(sup, dict) else ""
+        _head5 = f'<div class="hl">{esc(_sum5)}</div>' if _sum5 else ""
+        sup_html = _section_if(_t5, _head5 + _fold("💹 수급 상세 보기", sup_inner))
+    else:
+        sup_html = ""
 
     # 6. 공매도 (5·20·60일 구간별)
     sh = a["shorting"]
@@ -346,9 +462,15 @@ def build_html(analysis: dict) -> str:
             + sh_line("60일 추세", sh.get("d60"))
             + '<div class="row"><span class="k">기준</span><span class="v sub">각 구간 첫날 대비 현재 비중 변화(±0.3%p 이내 보합)</span></div>'
         )
+        _d20 = sh.get("d20") or {}
+        sh_head = (f'<div class="hl">현재 비중 <b>{now_v}%</b>'
+                   + (f' · 20일 <span style="color:{_dir_color(_d20.get("trend",""))}">'
+                      f'{esc(_d20.get("trend",""))}</span>' if _d20 else '')
+                   + '</div>')
+        sh_inner = sh_head + _fold("📉 공매도 상세 보기", sh_inner)
     else:
-        sh_inner = f'<div class="row"><span class="v na">{esc(sh.get("summary","공매도 데이터 없음"))}</span></div>'
-    sh_html = _section("6. 공매도 현황 (5·20·60일 구간별)", sh_inner)
+        sh_inner = ""
+    sh_html = _section_if("6. 공매도 현황 (5·20·60일 구간별)", sh_inner)
 
     # 7,8. 일봉 종합 + 실제 채점표 (이 종목이 각 항목에서 받은 점수)
     dv = a["daily_verdict"]
@@ -379,9 +501,8 @@ def build_html(analysis: dict) -> str:
     )
     daily_html = _section(
         "7·8. 일봉 종합 의견",
-        f'<div class="verdict-big" style="color:{dvcol}">{dv["verdict"]} '
-        f'<span class="sub">(score {dv["score"]:+d})</span></div>'
-        + score_table)
+        f'<div class="verdict-big" style="color:{dvcol}">{dv["verdict"]}</div>'
+        + _fold("🧮 채점 내역 보기", score_table))
 
     # 9. 월봉 종합 (채점표)
     mv = a["monthly_verdict"]
@@ -411,10 +532,9 @@ def build_html(analysis: dict) -> str:
     )
     monthly_html = _section(
         "9. 월봉 종합 의견",
-        f'<div class="verdict-big" style="color:{mvcol}">{mv["verdict"]} '
-        f'<span class="sub">(score {mv["score"]:+d})</span></div>'
-        + m_table
-        + f'<div class="sub" style="margin-top:6px">{esc(mv["note"])}</div>')
+        f'<div class="verdict-big" style="color:{mvcol}">{mv["verdict"]}</div>'
+        + (f'<div class="sub" style="margin-top:4px">{esc(mv["note"])}</div>' if mv.get("note") else "")
+        + _fold("🧮 채점 내역 보기", m_table))
 
     return f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8">
@@ -452,11 +572,28 @@ def build_html(analysis: dict) -> str:
   .chart img {{ width:100%; border-radius:6px; display:block; }}
   .na-chart {{ flex:1; min-width:210px; text-align:center; padding:40px 0;
     color:#5a5f6a; border:1px dashed {C_LINE}; border-radius:6px; }}
+  /* 접기/펼치기 */
+  .fold {{ margin:8px 0 2px; }}
+  .fold-s {{ cursor:pointer; list-style:none; font-size:12.5px; color:{C_SUB};
+    padding:6px 10px; border:1px solid {C_LINE}; border-radius:6px;
+    background:rgba(255,255,255,.02); user-select:none; }}
+  .fold-s::-webkit-details-marker {{ display:none; }}
+  .fold-s::before {{ content:"▸ "; color:{C_SUB}; }}
+  details[open] > .fold-s::before {{ content:"▾ "; }}
+  .fold-s:hover {{ color:{C_TEXT}; border-color:#3a3f4a; }}
+  .fold-b {{ padding:8px 2px 2px; }}
+  .hl {{ font-size:13.5px; line-height:1.6; padding:2px 0 4px; }}
   /* 통합 방향성 예측 */
   .fc-verdict {{ border:1px solid {C_LINE}; border-left-width:4px; border-radius:8px;
     padding:10px 14px; margin-bottom:10px; background:rgba(255,255,255,.02); }}
   .fc-v {{ font-size:19px; font-weight:800; letter-spacing:-.02em; }}
   .fc-s {{ color:{C_SUB}; font-size:12px; margin-top:2px; }}
+  .fc-narr {{ font-size:14px; line-height:1.6; margin-top:6px; color:{C_TEXT}; }}
+  .fac-wrap {{ display:flex; gap:10px; flex-wrap:wrap; margin:8px 0 4px; }}
+  .fac {{ flex:1; min-width:220px; background:rgba(255,255,255,.03);
+    border-radius:8px; padding:8px 12px; }}
+  .fac-h {{ font-size:12px; font-weight:700; margin-bottom:4px; }}
+  .fac-i {{ font-size:12.5px; padding:2px 0; color:{C_TEXT}; }}
   .hz-tbl {{ width:100%; border-collapse:collapse; font-size:12.5px; margin:6px 0 10px; }}
   .hz-tbl th {{ color:{C_SUB}; text-align:left; font-weight:600; padding:4px 8px;
     border-bottom:1px solid {C_LINE}; }}

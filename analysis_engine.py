@@ -1253,7 +1253,16 @@ def analyze_stock(name: str, code: str, daily: pd.DataFrame,
         "hourly": (str(pd.Timestamp(hourly.index[-1])) if hourly is not None and len(hourly) else ""),
     }
 
-    forecast = build_integrated_forecast(div, stoch, ma)
+    # 통합 판정: 첨부 판단기준 문서(조정 vs 꺾임) 기반
+    try:
+        from trend_judge import judge_trend
+        weekly_df = to_weekly(daily) if len(daily) > 10 else None
+        forecast = judge_trend(daily, weekly_df, monthly_full, stoch)
+        forecast["engine"] = "trend_judge"
+    except Exception as e:
+        print(f"[warn] trend_judge 실패 → 구 로직 폴백: {e}")
+        forecast = build_integrated_forecast(div, stoch, ma)
+        forecast["engine"] = "legacy"
 
     return {
         "name": name, "code": code,
