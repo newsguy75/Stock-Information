@@ -55,7 +55,15 @@ jobs:
           DAILY_YEARS:         "1"
           MONTHLY_YEARS:       "5"
           PAGES_BASE_URL:      ${{ vars.PAGES_BASE_URL }}
-        run: python portfolio_briefing.py
+        # 수동 실행(workflow_dispatch)일 때는 비거래일이어도 강제 실행.
+        # 코드 수정 후 주말에 리포트를 다시 생성할 때 필요.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "수동 실행 → --force 적용 (비거래일에도 생성)"
+            python portfolio_briefing.py --force
+          else
+            python portfolio_briefing.py
+          fi
 
       - name: Prune old data (7 days retention)
         if: always()
