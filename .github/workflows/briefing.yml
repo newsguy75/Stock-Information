@@ -27,11 +27,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install Korean font (matplotlib 한글 라벨용)
+        continue-on-error: true
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-nanum
-          # matplotlib 폰트 캐시 초기화
+          sudo apt-get update -qq || true
+          sudo apt-get install -y -qq fonts-nanum || true
+          fc-cache -f || true
           rm -rf ~/.cache/matplotlib || true
+          echo "설치된 한글 폰트:"
+          fc-list :lang=ko family 2>/dev/null | sort -u | head -5 || echo "(없음 - 영문 라벨로 폴백)"
 
       - name: Install deps
         run: |
