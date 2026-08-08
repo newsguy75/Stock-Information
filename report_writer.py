@@ -122,36 +122,79 @@ def build_html(analysis: dict) -> str:
     chart_html = _section("1. 차트 (일 · 월 / 캔들+MA5·20·60+거래량+스토캐)",
                           f'<div class="charts-vert">{"".join(chart_imgs)}</div>')
 
-    # 2. 다이버전스 (일봉·월봉만)
-    div_rows = []
-    for frame in ["일봉", "월봉"]:
-        d = a["divergence"].get(frame, {})
-        if not d.get("ok"):
-            div_rows.append(f'<div class="row"><span class="k">{frame}</span><span class="v na">데이터 부족</span></div>')
-        elif not d.get("found"):
-            div_rows.append(f'<div class="row"><span class="k">{frame}</span><span class="v sub">다이버전스 없음</span></div>')
-        else:
-            col = _dir_color(d["type"])
-            div_rows.append(
-                f'<div class="row"><span class="k">{frame}</span>'
-                f'<span class="v"><b style="color:{col}">{d["type"]}다이버전스</b> '
-                f'<span class="sub">[{d["to_date"]}]</span><br>'
-                f'<span class="sub">{esc(d["basis"])}</span></span></div>')
-    div_html = _section("2. 스토캐스틱 다이버전스 (근거·시점)", "".join(div_rows))
-
-    # 3. 스토캐 프레임 (일봉·월봉만)
+    # 2. 통합 방향성 예측 (다이버전스 + 스토캐 3구간 합산 → 하나의 결론)
+    fc = a.get("forecast", {})
     s = a["stoch_frames"]
-    stoch_body = (
-        f'<div class="frame"><div class="frame-n">일봉</div><div class="chips">'
-        + _sd("장기", s["daily"].get("장기", {})) + _sd("중기", s["daily"].get("중기", {})) + _sd("단기", s["daily"].get("단기", {}))
-        + '</div></div>'
-        f'<div class="frame"><div class="frame-n">월봉</div><div class="chips">'
-        + _sd("장기", s["monthly"].get("장기", {})) + _sd("중기", s["monthly"].get("중기", {})) + _sd("단기", s["monthly"].get("단기", {}))
-        + '</div></div>'
-    )
-    verdict_lines = "".join(f'<li>{esc(l)}</li>' for l in s["verdict"].get("lines", []))
-    stoch_body += f'<ul class="verdict-list">{verdict_lines}</ul>'
-    stoch_html = _section("3. 스토캐스틱 프레임별 방향성 (일 · 월 / 단기·중기·장기)", stoch_body)
+    if fc.get("ok"):
+        vcol = {"up": C_UP, "down": C_DOWN}.get(fc.get("vcolor"), C_SUB)
+
+        # (a) 최종 결론 배너
+        fc_body = (
+            f'<div class="fc-verdict" style="border-color:{vcol}">'
+            f'<div class="fc-v" style="color:{vcol}">{esc(fc["verdict"])}</div>'
+            f'<div class="fc-s">종합 점수 {fc["score"]:+.1f}'
+            + (f' · 대세(월봉 장기) <b style="color:{_dir_color(fc["main_trend"])}">{esc(fc["main_trend"])}</b>'
+               if fc.get("main_trend") else "") +
+            '</div></div>'
+        )
+
+        # (b) 시점별 방향 타임라인
+        hz_rows = []
+        for h in fc.get("horizons", []):
+            if h["direction"] == "판단불가":
+                hz_rows.append(
+                    f'<tr><td class="hz-p">{esc(h["period"])}</td>'
+                    f'<td class="hz-l">{esc(h["label"])}</td>'
+                    f'<td class="hz-d na">판단불가</td>'
+                    f'<td class="hz-x sub">{esc(h["detail"])}</td></tr>')
+                continue
+            dcol = _dir_color(h["direction"])
+            arrow = {"상승": "↗", "하락": "↘", "보합": "→"}.get(h["direction"], "→")
+            hz_rows.append(
+                f'<tr><td class="hz-p">{esc(h["period"])}</td>'
+                f'<td class="hz-l">{esc(h["label"])}</td>'
+                f'<td class="hz-d" style="color:{dcol}"><b>{arrow} {esc(h["direction"])}</b></td>'
+                f'<td class="hz-x sub">{esc(h["detail"])}</td></tr>')
+        fc_body += (
+            '<table class="hz-tbl"><thead><tr>'
+            '<th>시점</th><th>구간</th><th>방향</th><th>근거</th>'
+            '</tr></thead><tbody>' + "".join(hz_rows) + '</tbody></table>'
+        )
+
+        # (c) 다이버전스 선행신호
+        if fc.get("div_notes"):
+            dn = "".join(f'<li>{esc(n)}</li>' for n in fc["div_notes"])
+            fc_body += f'<div class="fc-sub">📐 다이버전스 (전환 선행신호)</div><ul class="verdict-list">{dn}</ul>'
+        else:
+            fc_body += '<div class="fc-sub">📐 다이버전스 <span class="sub">— 일봉·월봉 모두 없음</span></div>'
+
+        # (d) 대세 필터 / 3단 조건
+        if fc.get("filter_note"):
+            fc_body += f'<div class="fc-note">🧭 {esc(fc["filter_note"])}</div>'
+        if fc.get("setup"):
+            fc_body += f'<div class="fc-note">{esc(fc["setup"])}</div>'
+
+        # (e) 스토캐 3종 차트 (일봉 기준, 다이버전스·쌍바닥/쌍봉 표시)
+        st_uri = (a.get("charts") or {}).get("stoch_triple")
+        if st_uri:
+            fc_body += ('<div class="fc-sub">📈 일봉 스토캐 3구간 차트 (다이버전스 · 쌍바닥/쌍봉)</div>'
+                        f'<div class="chart-full"><img src="{st_uri}" alt="스토캐 3구간"></div>')
+
+        # (f) 원자료 칩 (일봉·월봉 3구간)
+        fc_body += (
+            '<div class="fc-sub">📊 원자료 — 스토캐 3구간</div>'
+            f'<div class="frame"><div class="frame-n">일봉</div><div class="chips">'
+            + _sd("장기", s["daily"].get("장기", {})) + _sd("중기", s["daily"].get("중기", {})) + _sd("단기", s["daily"].get("단기", {}))
+            + '</div></div>'
+            f'<div class="frame"><div class="frame-n">월봉</div><div class="chips">'
+            + _sd("장기", s["monthly"].get("장기", {})) + _sd("중기", s["monthly"].get("중기", {})) + _sd("단기", s["monthly"].get("단기", {}))
+            + '</div></div>'
+        )
+        div_html = _section("2. 통합 방향성 예측 (다이버전스 + 스토캐 3구간 → 시점별 전망)", fc_body)
+    else:
+        div_html = _section("2. 통합 방향성 예측", '<div class="row"><span class="v na">데이터 부족</span></div>')
+
+    stoch_html = ""   # 3번은 2번에 통합됨
 
     # 4. 이평선 (5/20/60 + 방향예측)
     ma = a["ma"]
@@ -401,6 +444,21 @@ def build_html(analysis: dict) -> str:
   .chart img {{ width:100%; border-radius:6px; display:block; }}
   .na-chart {{ flex:1; min-width:210px; text-align:center; padding:40px 0;
     color:#5a5f6a; border:1px dashed {C_LINE}; border-radius:6px; }}
+  /* 통합 방향성 예측 */
+  .fc-verdict {{ border:1px solid {C_LINE}; border-left-width:4px; border-radius:8px;
+    padding:10px 14px; margin-bottom:10px; background:rgba(255,255,255,.02); }}
+  .fc-v {{ font-size:19px; font-weight:800; letter-spacing:-.02em; }}
+  .fc-s {{ color:{C_SUB}; font-size:12px; margin-top:2px; }}
+  .hz-tbl {{ width:100%; border-collapse:collapse; font-size:12.5px; margin:6px 0 10px; }}
+  .hz-tbl th {{ color:{C_SUB}; text-align:left; font-weight:600; padding:4px 8px;
+    border-bottom:1px solid {C_LINE}; }}
+  .hz-tbl td {{ padding:5px 8px; border-bottom:1px solid {C_LINE}; }}
+  .hz-p {{ width:78px; color:{C_TEXT}; font-weight:600; }}
+  .hz-l {{ width:78px; color:{C_SUB}; }}
+  .hz-d {{ width:92px; }}
+  .fc-sub {{ font-size:12px; color:{C_SUB}; font-weight:700; margin:10px 0 4px; }}
+  .fc-note {{ font-size:12.5px; padding:8px 10px; margin:6px 0;
+    background:rgba(255,255,255,.03); border-radius:6px; line-height:1.55; }}
   /* 세로 2줄 차트 (일봉/월봉 가득 차게) */
   .charts-vert {{ display:flex; flex-direction:column; gap:16px; }}
   .chart-full {{ width:100%; }}
